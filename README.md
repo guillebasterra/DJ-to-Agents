@@ -39,6 +39,11 @@ Decisions accepts raw audio directly, so the Hydrogen perception fallback is not
 - `clock.dsp` carries an extra `kicks` count (kicks since the last clock message) next to the `kick` flag,
   so the backend can compute kick_rate from a 4 Hz stream.
 - Dev hook: `?track=0` starts the first track without the picker (only works where autoplay is allowed).
+- Physics: `retreat` counts as resting for energy recovery (otherwise an exhausted agent could never get back
+  to E >= 0.3). `pressure` is the summed overlap with a 12% soft margin, so agents in resting contact still
+  flatten a little. `Agent.target` is a 3D point.
+- Physics, energy and happiness only advance while audio is playing; frames keep streaming while paused.
+- Phase B check: `python -m server.headless` runs physics + shove on a synthetic loud / quiet schedule.
 
 ## Credits
 
