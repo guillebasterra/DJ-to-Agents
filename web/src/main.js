@@ -46,9 +46,10 @@ const audio = new AudioEngine({
 const ui = initUI({ audio, net, overlay, state });
 setInterval(() => { if (audio.source) net.send(audio.clock()); }, 250);
 
-// Real happiness mostly lives in 0..0.5 (u is divided by 3), so stretch it
-// over the whole blue -> red -> white range for display only.
-const showH = (h) => 1 - Math.exp(-6 * h);
+// Display only: in real runs happiness sits between about 0.03 and 0.2 (u is
+// divided by 3 and scaled by energy), so stretch that band over the whole
+// blue -> red -> white range. Logs and analysis keep the raw value.
+const showH = (h) => Math.min(1, Math.max(0, (h - 0.03) / 0.14)) ** 0.7;
 const lerp = (a, b, t) => a + (b - a) * t;
 let fps = 60, last = performance.now() / 1000, slowSince = 0;
 

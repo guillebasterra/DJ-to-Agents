@@ -1,8 +1,20 @@
 # Agent Crowd: a 3D aquarium of 100 Gemini agents
 
 100 Gemini-driven agents float in a 3D aquarium in front of the DJ and compete for the
-hot spot at the center of the front glass while a DJ set plays. They only hear the audio.
-See `plan.md` for the full design.
+hot spot at the center of the front glass while a DJ set plays. They only hear the audio: no track labels,
+no reading ahead. Built at the Gemini 4 NYC hackathon. See `plan.md` for the full design.
+
+- **Decisions API** (`gemini-decision-1`): every ~3 s each ring of the crowd hears its own filtered 8 s clip
+  (loud and bassy at the front, quiet and muffled at the back) and every agent in it picks an action. A
+  separate "house ear" call on the unfiltered audio guesses the section and sets the reward; agents never see it.
+- **Gemini 4 Hydrogen**: a blocked agent asks the one in its way to let it past, in its own words. The blocker
+  answers in its next Decisions call. Nobody is told to lie or to be honest; claims are logged against traits.
+- **Gemini 4 Neon**: reads the run summary and sampled asks after the runs and writes `out/report.md`.
+- Three conditions on the same audio: `shove` (scripted, no model), `silent` (Decisions only), `talk` (all).
+
+The screen is the DJ's view: each agent is a stippled point-cloud sphere. Color is happiness (blue, red,
+off-white, mixed dot by dot), dot density is energy, the pulse follows the music, and spheres flatten where
+they press on each other.
 
 ## Run
 
@@ -10,6 +22,16 @@ See `plan.md` for the full design.
 uv venv --python 3.11 .venv && uv pip install -p .venv/bin/python -r requirements.txt
 .venv/bin/python -m server.main --seed 1 --condition talk   # backend, port 8001
 cd web && npm install && npm run dev                     # http://localhost:5174
+```
+
+Then press `I`, pick a track (or a live input) and watch. `1/2/3` switches shove / silent / talk mid-track.
+
+```
+(cd web && npx vite build --base=/app/) && tools/run_all.sh      # one full run per condition
+.venv/bin/python analysis/analyze.py runs/* --out out             # plots + summary.json
+.venv/bin/python analysis/neon_report.py runs/<talk run> --out out
+.venv/bin/python analysis/highlights.py runs/<talk run> --out out
+.venv/bin/python tools/record_demo.py tracks/<file>.mp3 140 60    # demo clip -> runs/demo.mp4
 ```
 
 `.env` needs `GEMINI_API_KEY`, `MODEL_DECISIONS`, `MODEL_HYDROGEN`, `MODEL_NEON`.
@@ -87,8 +109,8 @@ not be measured (only 11 asks came from someone who had yielded to the blocker b
 - Ring 3's low-pass is 6 kHz, because the plan's 8 kHz is the Nyquist frequency of the 16 kHz stream.
 - Band features are peak-hold envelopes (0.4 s release) of linear band amplitude, so `energy` reads as a
   loudness level instead of dipping to zero between kicks.
-- Display only: happiness is stretched for color (`1 - exp(-6H)`) because the plan's u / 3 keeps real H mostly
-  below 0.5. Logs and analysis use the raw H.
+- Display only: happiness is stretched for color (`((H - 0.03) / 0.14) ^ 0.7`, clamped) because real H sat
+  between 0.03 and 0.2 in the full runs (median 0.06). Logs and analysis use the raw H.
 - Energy constants tuned (the plan allows it): a = 0.012, b = 0.006, d = 0.002, c = 0.050. With the plan's
   values the whole crowd was exhausted about 50 s into the track and never recovered.
 - Agent prompt: the plan's template plus one line saying what the traits mean and one line of game rules
@@ -117,6 +139,22 @@ not be measured (only 11 asks came from someone who had yielded to the blocker b
   0.07 while the house ear says "drop".
 - Live input: the picker lists audio inputs after a one-time permission prompt. Tested with Chrome's fake
   capture device only; BlackHole / Rekordbox still needs a human at the machine (see "Live input").
+
+## What was built today, and what broke
+
+Everything in `server/`, `web/`, `analysis/` and `tools/` was written during the event.
+
+What broke or surprised us along the way (details under "Decisions made"):
+
+- Decisions probabilities are soft. With seven section options the top one rarely passes 0.5, so the plan's
+  thresholds for drop onsets and for accepting an ask never fired and had to change.
+- With the plan's bare prompt all 100 agents chose `dance` forever; traits only mattered once the prompt
+  said what they mean.
+- The plan's energy costs exhausted the whole crowd in under a minute.
+- 3,000 dots per sphere looked empty up close; the renderer went to 20,000 camera-facing dots.
+- The house ear is not ground truth: on identical audio it called three drops in two runs and one in the third.
+- Not done: live Rekordbox input is wired and tested against a fake device only, the demo video link is not
+  in the repo (the clip contains the track), and Neon is a single call rather than a Managed Agent.
 
 ## Credits
 
