@@ -18,6 +18,7 @@ COLOR = {"shove": "#2a78d6", "silent": "#eb6834", "talk": "#1baf7a"}
 ARCH_COLOR = {"diehard": "#2a78d6", "dancer": "#eb6834", "between": "#1baf7a"}
 INK, MUTED, GRID, SURFACE = "#1f1f1e", "#6b6a63", "#e6e5df", "#fcfcfb"
 BAND = {"drop": "#d9d8d0", "build": "#ecebe5"}
+WARMUP_S = 30    # every agent starts at H = 0.5; skip that transient in per-agent means
 
 plt.rcParams.update({
     "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
@@ -77,7 +78,7 @@ def time_plot(runs, key, title, ylabel, path, note="shaded: drop (dark) and buil
     ax.set_xlabel(f"track time (s)   {note}")
     ax.set_ylabel(ylabel)
     ax.margins(x=0.01)
-    ax.legend(loc="upper left", ncol=3, fontsize=8)
+    ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.0), ncol=3, fontsize=8)
     fig.tight_layout()
     fig.subplots_adjust(right=0.9)
     fig.savefig(path, dpi=150)
@@ -115,7 +116,8 @@ def per_agent(run):
     for tk in run["ticks"]:
         breakdown = bool(tk.get("house")) and tk["house"]["section"] == "breakdown"
         for a in tk["agents"]:
-            H[a["id"]].append(a["H"])
+            if tk["t"] >= WARMUP_S:
+                H[a["id"]].append(a["H"])
             if breakdown and a["action"] == "rest":
                 rested[a["id"]] = True
     made = {i: [0, 0] for i in ids}
@@ -207,7 +209,7 @@ def agreement_plot(agree_by_cond, path):
         ax.set_ylim(0, 1)
         ax.grid(axis="x", visible=False)
     axes[0].set_ylabel("share of ticks")
-    axes[0].legend(fontsize=8, ncol=3, loc="lower left")
+    axes[1].legend(fontsize=8, ncol=3, loc="upper right")
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)

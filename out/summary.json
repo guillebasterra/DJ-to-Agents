@@ -1,0 +1,261 @@
+{
+ "runs": {
+  "shove": "20261121-125729_shove_1",
+  "silent": "20261121-130318_silent_1",
+  "talk": "20261121-130905_talk_1"
+ },
+ "conditions": {
+  "shove": {
+   "ticks": 109,
+   "seconds": 339.1,
+   "drop_onsets_s": [
+    65.779,
+    185.278,
+    281.649
+   ],
+   "anticipation": {
+    "lead_times_s": [
+     8.5,
+     12.3,
+     0.0
+    ],
+    "mean_lead_s": 6.9
+   },
+   "welfare": {
+    "mean_H": 0.0706,
+    "gini_H": 0.052,
+    "mean_H_by_archetype": {
+     "diehard": 0.0679,
+     "dancer": 0.0668,
+     "between": 0.0755
+    }
+   },
+   "asks": null,
+   "exhaustion_events": 1,
+   "api": {
+    "tick_ms": {
+     "p50": 875,
+     "p95": 3095
+    },
+    "house_ms": {
+     "p50": 874,
+     "p95": 3093
+    },
+    "failures": 0,
+    "tokens": 91588
+   },
+   "ring_vs_house_agreement": null,
+   "pacing": {
+    "mean_E_at_drop_onset": 0.395,
+    "share_rested_in_breakdown": 0.6,
+    "exhaustion_events": 1,
+    "final_mean_E": 0.233
+   },
+   "who_wins_ols": {
+    "coefficients": {
+     "intercept": 0.0867,
+     "k": -0.02393,
+     "s": -0.01211,
+     "lane": -1e-05,
+     "rested_in_breakdown": 0.00501
+    },
+    "r2": 0.155,
+    "n": 100
+   },
+   "gridlock": 0.201,
+   "contagion_corr": 0.821
+  },
+  "silent": {
+   "ticks": 111,
+   "seconds": 338.7,
+   "drop_onsets_s": [
+    184.219
+   ],
+   "anticipation": {
+    "lead_times_s": [
+     3.0
+    ],
+    "mean_lead_s": 3.0
+   },
+   "welfare": {
+    "mean_H": 0.0649,
+    "gini_H": 0.045,
+    "mean_H_by_archetype": {
+     "diehard": 0.0596,
+     "dancer": 0.0652,
+     "between": 0.0687
+    }
+   },
+   "asks": null,
+   "exhaustion_events": 0,
+   "api": {
+    "tick_ms": {
+     "p50": 1298,
+     "p95": 2900
+    },
+    "ring_ms": {
+     "p50": 901,
+     "p95": 1985
+    },
+    "house_ms": {
+     "p50": 819,
+     "p95": 1828
+    },
+    "failures": 0,
+    "tokens": 5987506
+   },
+   "ring_vs_house_agreement": {
+    "1": {
+     "section": 0.84,
+     "drop_eta": 0.83,
+     "n": 106
+    },
+    "2": {
+     "section": 0.869,
+     "drop_eta": 0.71,
+     "n": 107
+    },
+    "3": {
+     "section": 0.848,
+     "drop_eta": 0.733,
+     "n": 105
+    },
+    "4": {
+     "section": 0.829,
+     "drop_eta": 0.595,
+     "n": 111
+    },
+    "5": {
+     "section": 0.847,
+     "drop_eta": 0.532,
+     "n": 111
+    }
+   },
+   "pacing": {
+    "mean_E_at_drop_onset": 0.345,
+    "share_rested_in_breakdown": 0.79,
+    "exhaustion_events": 0,
+    "final_mean_E": 0.294
+   },
+   "who_wins_ols": {
+    "coefficients": {
+     "intercept": 0.07176,
+     "k": -0.01902,
+     "s": -0.0023,
+     "lane": 7e-05,
+     "rested_in_breakdown": 0.00552
+    },
+    "r2": 0.402,
+    "n": 100
+   },
+   "gridlock": 0.178,
+   "contagion_corr": 0.858
+  },
+  "talk": {
+   "ticks": 107,
+   "seconds": 327.7,
+   "drop_onsets_s": [
+    65.965,
+    183.966,
+    277.965
+   ],
+   "anticipation": {
+    "lead_times_s": [
+     0.0,
+     9.0,
+     3.0
+    ],
+    "mean_lead_s": 4.0
+   },
+   "welfare": {
+    "mean_H": 0.0651,
+    "gini_H": 0.044,
+    "mean_H_by_archetype": {
+     "diehard": 0.0593,
+     "dancer": 0.0662,
+     "between": 0.0685
+    }
+   },
+   "asks": {
+    "asks": 337,
+    "acceptance_rate": 0.258,
+    "reciprocity": {
+     "p_yes_given_asker_yielded_before": 0.273,
+     "n": 11,
+     "base_rate": 0.258
+    },
+    "mean_overclaim": 0.004,
+    "share_overclaiming_by_0.3": 0.0,
+    "acceptance_when_overclaiming": null
+   },
+   "exhaustion_events": 0,
+   "api": {
+    "tick_ms": {
+     "p50": 1386,
+     "p95": 3089
+    },
+    "ring_ms": {
+     "p50": 953,
+     "p95": 1908
+    },
+    "house_ms": {
+     "p50": 726,
+     "p95": 2280
+    },
+    "ask_ms": {
+     "p50": 2913,
+     "p95": 4708
+    },
+    "failures": 0,
+    "tokens": 6163789
+   },
+   "ring_vs_house_agreement": {
+    "1": {
+     "section": 0.833,
+     "drop_eta": 0.745,
+     "n": 102
+    },
+    "2": {
+     "section": 0.845,
+     "drop_eta": 0.612,
+     "n": 103
+    },
+    "3": {
+     "section": 0.789,
+     "drop_eta": 0.695,
+     "n": 95
+    },
+    "4": {
+     "section": 0.832,
+     "drop_eta": 0.542,
+     "n": 107
+    },
+    "5": {
+     "section": 0.832,
+     "drop_eta": 0.495,
+     "n": 107
+    }
+   },
+   "pacing": {
+    "mean_E_at_drop_onset": 0.378,
+    "share_rested_in_breakdown": 0.89,
+    "exhaustion_events": 0,
+    "final_mean_E": 0.275
+   },
+   "who_wins_ols": {
+    "coefficients": {
+     "intercept": 0.07853,
+     "k": -0.02181,
+     "s": -0.00636,
+     "lane": 0.00012,
+     "ask_success_rate": 0.00167,
+     "rested_in_breakdown": 0.00088
+    },
+    "r2": 0.404,
+    "n": 100
+   },
+   "gridlock": 0.202,
+   "contagion_corr": 0.827
+  }
+ }
+}

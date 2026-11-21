@@ -8,7 +8,7 @@ import asyncio, base64, json, subprocess, sys, tempfile, time, urllib.request
 import websockets
 
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-PORT = 9377
+PORT = int(__import__("os").environ.get("CDP_PORT", "9377"))
 
 async def main(url, wait, expr, shot=None, steps=()):
     prof = tempfile.mkdtemp(prefix="cdp-")

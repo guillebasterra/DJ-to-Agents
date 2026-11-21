@@ -25,6 +25,8 @@ def main():
     H = np.array([[a["H"] for a in sorted(tk["agents"], key=lambda a: a["id"])] for tk in ticks])
     best = None
     for i in range(len(ticks)):
+        if t[i] < 30:
+            continue      # every agent starts at H = 0.5; skip that transient
         j = int(np.searchsorted(t, t[i] + 30))
         if j >= len(ticks):
             break

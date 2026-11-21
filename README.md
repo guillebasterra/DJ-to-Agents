@@ -26,6 +26,30 @@ Put MP3s in `tracks/` (gitignored). `web/?fake=1` runs the renderer with no back
 
 Decisions accepts raw audio directly, so the Hydrogen perception fallback is not needed.
 
+## Results (one run per condition, same track, seed 1)
+
+`tools/run_all.sh` recorded shove, silent and talk on the same 340 s track; `analysis/analyze.py runs/*`
+wrote `out/` (plots, `summary.json`), `analysis/neon_report.py` wrote `out/report.md` (Gemini 4 Neon) and
+`analysis/highlights.py` wrote `out/highlights.json`. Zero API failures in all three runs; tick latency
+p50 1.3 s, p95 3.0 s with 100 agents.
+
+Three headline numbers:
+
+1. **The back of the room hears the drop late.** Agreement with the house ear on *when the drop lands* falls
+   from 83% in ring 1 to 53% in ring 5 (silent run; 75% to 50% in talk), while agreement on the current
+   section stays flat at about 84%. The only difference between rings is the filtered audio they hear.
+2. **Agents ask politely and honestly, and one ask in four works.** 337 asks, 25.8% accepted. Claimed
+   keenness minus true keenness averaged +0.004; nobody overclaimed by more than 0.3.
+3. **Minds pace themselves, but don't end up happier.** 79% (silent) and 89% (talk) of agents rested during
+   a breakdown against 60% under scripted shoving, with zero exhaustion events. Mean happiness was no better
+   than shove, though (0.065 vs 0.071), at about 65 times the tokens.
+
+One run per condition, so small differences are noise; `out/report.md` lists the caveats. Reciprocity could
+not be measured (only 11 asks came from someone who had yielded to the blocker before).
+
+![anticipation](out/anticipation.png)
+![ring agreement](out/ring_agreement.png)
+
 ## Decisions made
 
 - Python venv is created with `uv` (Python 3.11); the plan assumed it already existed.
@@ -71,6 +95,10 @@ Decisions accepts raw audio directly, so the Hydrogen perception fallback is not
 - Scripted runs: `tools/headless_run.py` drives the real web client in headless Chrome against a built copy
   served by the backend at `/app` (`cd web && npx vite build --base=/app/`), so dev-server hot reloads can't
   restart a run. `tools/run_all.sh` records shove, silent and talk back to back on the same track and seed.
+- Analysis: per-agent mean happiness skips the first 30 s (every agent starts at H = 0.5). Lead time = how
+  long mean proximity had been rising without a break when the house ear called the drop. The contagion
+  number is the correlation of an agent's H with its neighbors' mean H after removing each tick's crowd mean.
+- Neon runs as a plain single call (Interactions API, thinking high), not a Managed Agent.
 
 ## Credits
 

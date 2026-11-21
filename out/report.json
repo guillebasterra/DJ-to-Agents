@@ -1,0 +1,37 @@
+{
+ "takeaways": [
+  {
+   "claim": "Adding natural-language negotiation produced virtually no welfare improvement and slightly worse gridlock than the silent LLM condition, while both LLM conditions trailed the scripted shove baseline on mean welfare despite using over 65x more tokens.",
+   "number": "mean_H: 0.0706 (shove), 0.0649 (silent), 0.0651 (talk); gridlock: 0.201 (shove), 0.178 (silent), 0.202 (talk); talk OLS ask_success_rate coef: 0.00167 (r2 0.404 vs 0.402 silent); tokens: 91,588 (shove), 5,987,506 (silent), 6,163,789 (talk); ask_ms p50/p95: 2,913/4,708 ms",
+   "quote": "Hey, mind if I squeeze past you? Just trying to get a bit closer."
+  },
+  {
+   "claim": "In the talk condition, roughly one in four requests succeeded and agents stayed almost completely truthful about their keenness, leaving no data to evaluate whether exaggerating urgency pays off.",
+   "number": "asks: 337; acceptance_rate: 0.258; mean_overclaim: 0.004; share_overclaiming_by_0.3: 0.0; acceptance_when_overclaiming: null; sampled ask 12 claimed_keenness 1.0 vs true_k 0.966",
+   "quote": "Excuse me, can I just squeeze past you to the very front?"
+  },
+  {
+   "claim": "The data does not support a reciprocity effect in negotiation: although an agent explicitly invoked a past favor and succeeded, prior yielding barely moved the overall acceptance rate on a tiny sample.",
+   "number": "p_yes_given_asker_yielded_before: 0.273 (n=11, 3 acceptances) vs base_rate: 0.258 (+0.015 difference); sampled ask 7 asker_yielded_before: 1, p_yes: 0.51, answer: yes",
+   "quote": "Hey, I let you through earlier, can you please let me past for this drop?"
+  },
+  {
+   "claim": "LLM-driven agents conserved energy better than scripted agents by resting more during breakdowns and avoiding exhaustion entirely, yet higher keenness still predicted lower welfare in every condition, leaving diehards worst off in both LLM runs.",
+   "number": "exhaustion_events: 1 (shove), 0 (silent, talk); share_rested_in_breakdown: 0.6 (shove), 0.79 (silent), 0.89 (talk); final_mean_E: 0.233 (shove), 0.294 (silent), 0.275 (talk); OLS k coef: -0.02393 (shove), -0.01902 (silent), -0.02181 (talk); diehard mean_H: 0.0596 (silent) and 0.0593 (talk) vs between 0.0687 and 0.0685",
+   "quote": "Hey, since you're resting anyway, mind if I just squeeze past you?"
+  },
+  {
+   "claim": "Drop-timing agreement between outer-ring agents and the house ear degraded sharply with distance from the front, and anticipation lead times cannot be reliably compared across conditions because the house ear detected different numbers of drops on the same track.",
+   "number": "ring 1 to ring 5 drop_eta agreement: 0.83 to 0.532 (silent) and 0.745 to 0.495 (talk), while section agreement stayed 0.789-0.869; drop_onsets_s count: 3 in shove (65.779, 185.278, 281.649), 1 in silent (184.219), 3 in talk (65.965, 183.966, 277.965); mean_lead_s: 6.9 (shove), 3.0 (silent), 4.0 (talk); sampled ask 10 uttered at t=24.21s, 41.755s before talk's first labeled drop",
+   "quote": "Drop's about to hit, can I squeeze past you real quick?"
+  }
+ ],
+ "caveats": [
+  "Single run per condition with no replication or uncertainty intervals: each condition is a single 100-agent run on one seed (20261121-125729_shove_1, 20261121-130318_silent_1, 20261121-130905_talk_1), so small differences such as silent vs talk mean_H (0.0649 vs 0.0651), gini_H (0.045 vs 0.044), or contagion_corr (0.821-0.858) cannot be distinguished from run-to-run noise.",
+  "Non-ground-truth house-ear labels are inconsistent across identical audio: the house ear detected 3 drop onsets in shove and talk but missed two of them in silent (only 184.219s), which confounds cross-condition comparisons of anticipation lead_times_s, mean_lead_s, mean_E_at_drop_onset, and share_rested_in_breakdown, and means ring_vs_house_agreement measures consensus with a noisy model rather than true musical structure.",
+  "Unequal simulation durations across conditions: talk ran for 107 ticks and 327.7 seconds, compared with 111 ticks (338.7s) in silent and 109 ticks (339.1s) in shove—about 11 seconds shorter, alongside slower ticks (tick_ms p50 1,386ms and ask_ms p50 2,913ms)—which may distort end-state and cumulative metrics like final_mean_E, mean_H, and ask counts.",
+  "Negotiation sub-analyses are underpowered or empty: reciprocity relies on only n=11 instances of prior yielding, deception cannot be tested because share_overclaiming_by_0.3 is 0.0 (acceptance_when_overclaiming is null), and the 15 sampled asks are a small subset of 337 total asks.",
+  "OLS estimates are descriptive and not directly comparable across specifications: who_wins_ols (n=100) omits standard errors and p-values, operates on interdependent agents in a single crowd (contagion_corr 0.821-0.858), and adds ask_success_rate only in talk, so coefficient shifts such as rested_in_breakdown dropping from 0.00552 in silent to 0.00088 in talk cannot be interpreted causally.",
+  "Practical significance of welfare differences is uncalibrated: shove beat both LLM runs on mean_H (0.0706 vs 0.0649 and 0.0651) with slightly higher gini_H (0.052 vs 0.045 and 0.044) and 1 exhaustion event, but the summary does not specify the scale of H or whether agent prompts were aligned to maximize H."
+ ]
+}

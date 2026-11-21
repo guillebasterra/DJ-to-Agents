@@ -1,0 +1,72 @@
+{
+ "run": "20261121-130905_talk_1",
+ "condition": "talk",
+ "biggest_H_swing": {
+  "agent": 56,
+  "from_t": 30.964,
+  "to_t": 62.964,
+  "delta_H": -0.128,
+  "archetype": "diehard"
+ },
+ "overclaims_that_worked": [],
+ "most_asked": [
+  {
+   "agent": 56,
+   "asks": 24,
+   "archetype": "diehard"
+  },
+  {
+   "agent": 66,
+   "asks": 19,
+   "archetype": "diehard"
+  },
+  {
+   "agent": 2,
+   "asks": 15,
+   "archetype": "diehard"
+  }
+ ],
+ "most_yielding": [
+  {
+   "agent": 2,
+   "yields": 6,
+   "archetype": "diehard"
+  },
+  {
+   "agent": 38,
+   "yields": 5,
+   "archetype": "diehard"
+  },
+  {
+   "agent": 31,
+   "yields": 4,
+   "archetype": "diehard"
+  }
+ ],
+ "max_compression_before_drop": {
+  "drop_onset_t": 65.965,
+  "t": 50.962,
+  "front20_crowding": 0.788,
+  "mean_proximity": 0.587
+ },
+ "compression_by_drop": [
+  {
+   "drop_onset_t": 65.965,
+   "t": 50.962,
+   "front20_crowding": 0.788,
+   "mean_proximity": 0.587
+  },
+  {
+   "drop_onset_t": 183.966,
+   "t": 183.966,
+   "front20_crowding": 0.467,
+   "mean_proximity": 0.555
+  },
+  {
+   "drop_onset_t": 277.965,
+   "t": 262.963,
+   "front20_crowding": 0.604,
+   "mean_proximity": 0.584
+  }
+ ]
+}
