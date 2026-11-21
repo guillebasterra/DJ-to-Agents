@@ -1,130 +1,78 @@
-// The aquarium renderer: every agent is an instanced point cloud (three.js).
+// The aquarium renderer (three.js): every agent is one billboard with analytic
+// sphere shading. Three passes: (1) blobs add into a density field, (2) the
+// field is resolved into glowing, softly merged bodies and folded into a
+// decaying trail buffer, (3) a fine per-pixel grain pass draws it to the screen.
 import * as THREE from 'three';
-import { BG, BLUE, RED, WHITE } from './palette.js';
-import deform from './shaders/deform.glsl?raw';
-import pointsVert from './shaders/points.vert.glsl?raw';
-import pointsFrag from './shaders/points.frag.glsl?raw';
-import occluderVert from './shaders/occluder.vert.glsl?raw';
-import occluderFrag from './shaders/occluder.frag.glsl?raw';
+import { BG, HappinessScale, happinessColor } from './palette.js';
+import blobVert from './shaders/blob.vert.glsl?raw';
+import blobFrag from './shaders/blob.frag.glsl?raw';
+import screenVert from './shaders/screen.vert.glsl?raw';
+import resolveFrag from './shaders/resolve.frag.glsl?raw';
+import grainFrag from './shaders/grain.frag.glsl?raw';
 
-export const AGENT_RADIUS = 0.06;
-const POINTS_PER_SPHERE = 20000;
-const CAMERA = new THREE.Vector3(0.5, 0.5, -0.35);
+export const AGENT_RADIUS = 0.075;
+const CAMERA = new THREE.Vector3(0.5, 0.5, -1.2);   // pulled back: the whole box fits with margin
 const LOOK_AT = new THREE.Vector3(0.5, 0.5, 0.5);
+const FOV = 50;
 const DRIFT = 0.03;
-const GHOSTS = 3;              // trail ghosts per agent
-const GHOST_POINTS = 2500;
-const GHOST_GAP = 0.9;         // seconds between ghosts
-const PUSH_IN = 0.07;         // camera creeps toward the glass on the drop
-
-const glsl = (src) => src.replace('#include deform', deform);
-
-// Points on the camera-facing half of a unit sphere, sampled evenly over its
-// projected disc so no dots are wasted on the limb or the hidden back half
-// (the shader turns each cloud to face the camera). A thin halo outside the
-// silhouette gives the soft speckled edge. Random order, so any prefix is a
-// uniform sample.
-function spherePoints(n) {
-  const pos = new Float32Array(n * 3);
-  const rnd = new Float32Array(n * 2);
-  for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const halo = Math.random() < 0.12;
-    const r = halo ? 1.0 - Math.log(1 - Math.random()) * 0.06 : Math.sqrt(Math.random());
-    const z = halo ? 0 : Math.sqrt(1 - r * r);
-    pos.set([r * Math.cos(a), r * Math.sin(a), z], i * 3);
-    rnd.set([Math.random(), Math.random()], i * 2);
-  }
-  return { pos, rnd };
-}
-
-function grain(canvas) {
-  const size = 256, g = canvas.getContext('2d');
-  canvas.width = canvas.height = size;
-  const img = g.createImageData(size, size);
-  for (let i = 0; i < size * size; i++) {
-    const on = Math.random() < 0.06;
-    img.data.set([216, 212, 214, on ? 10 + Math.random() * 18 : 0], i * 4);
-  }
-  g.putImageData(img, 0, 0);
-}
+const PUSH_IN = 0.10;         // camera creeps toward the glass on the drop
+const SMOOTH_K = 5.5;         // smooth-min sharpness (per radius): lower is gooier
+const EXTENT = 2.7;           // billboard half-size in radii (body + halo + squash bulge)
+const TRAIL_TAU = 0.55;       // seconds for a smear to fade to 1/e
+// Squash spring-damper: underdamped, so blobs wobble after an impact.
+const SPRING = 150, DAMPING = 9;
 
 export class Plate {
-  constructor(canvas, grainCanvas, maxAgents = 100) {
+  constructor(canvas, maxAgents = 100) {
     this.canvas = canvas;
     this.max = maxAgents;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true });
-    this.renderer.setClearColor(0x000000, 0);
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.02, 4);
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
+    this.renderer.autoClear = false;
+    this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.05, 6);
     this.pushIn = 0;
-    if (grainCanvas) grain(grainCanvas);
-
-    const inst = {
-      iPos: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * 3), 3),
-      iVel: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * 3), 3),
-      iSquash: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * 4), 4),
-      iState: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * 4), 4),
-    };
-    for (const a of Object.values(inst)) a.setUsage(THREE.DynamicDrawUsage);
-    this.inst = inst;
-
-    const rgb = (hex) => new THREE.Color(hex).convertLinearToSRGB();
-    this.uniforms = {
-      uRadius: { value: AGENT_RADIUS }, uEnergy: { value: 0 }, uKick: { value: 0 },
-      uDpr: { value: 1 }, uLod: { value: 0.55 }, uTime: { value: 0 }, uFaces: { value: 1 }, uPx: { value: 0.001 },
-      uLight: { value: new THREE.Vector3(-0.55, 0.6, 0.58).normalize() },
-      uBg: { value: rgb(BG) }, uBlue: { value: rgb(BLUE) }, uRed: { value: rgb(RED) }, uWhite: { value: rgb(WHITE) },
-    };
-
-    const { pos, rnd } = spherePoints(POINTS_PER_SPHERE);
-    const dots = new THREE.InstancedBufferGeometry();
-    dots.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    dots.setAttribute('aRnd', new THREE.BufferAttribute(rnd, 2));
-    const body = new THREE.InstancedBufferGeometry().copy(new THREE.IcosahedronGeometry(1, 4));
-    for (const g of [dots, body]) {
-      for (const [name, attr] of Object.entries(inst)) g.setAttribute(name, attr);
-      g.instanceCount = 0;
-    }
-    this.dots = dots;
-    this.body = body;
-    this.pointBudget = POINTS_PER_SPHERE;
-
-    const occluder = new THREE.Mesh(body, new THREE.ShaderMaterial({
-      uniforms: this.uniforms, vertexShader: glsl(occluderVert), fragmentShader: occluderFrag,
-    }));
-    const points = new THREE.Points(dots, new THREE.ShaderMaterial({
-      uniforms: this.uniforms, vertexShader: glsl(pointsVert), fragmentShader: pointsFrag,
-    }));
-    // Trails: a few past positions per agent as faint, sparse ghosts. They reuse
-    // the first GHOST_POINTS dots and are hidden by any body in front of them.
-    const gInst = this.ghostInst = {
-      iPos: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * GHOSTS * 3), 3),
-      iVel: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * GHOSTS * 3), 3),
-      iSquash: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * GHOSTS * 4), 4),
-      iState: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * GHOSTS * 4), 4),
-    };
-    const ghostGeo = this.ghostGeo = new THREE.InstancedBufferGeometry();
-    ghostGeo.setAttribute('position', dots.getAttribute('position'));
-    ghostGeo.setAttribute('aRnd', dots.getAttribute('aRnd'));
-    for (const [name, attr] of Object.entries(gInst)) {
-      attr.setUsage(THREE.DynamicDrawUsage);
-      ghostGeo.setAttribute(name, attr);
-    }
-    ghostGeo.setDrawRange(0, GHOST_POINTS);
-    ghostGeo.instanceCount = 0;
-    const ghosts = new THREE.Points(ghostGeo, new THREE.ShaderMaterial({
-      uniforms: this.uniforms, vertexShader: '#define GHOST\n' + glsl(pointsVert), fragmentShader: pointsFrag,
-    }));
-    this.history = new Map();   // agent id -> [{t, x, y, z}], newest last
-    this.trails = true;
     this.pushTarget = 0;
+    this.quality = 1;             // field resolution, relative to CSS pixels
+    this.scale = new HappinessScale();
+    this.springs = new Map();     // agent id -> {s, v, nx, ny, nz}
+    this.lastTime = 0;
 
-    occluder.frustumCulled = points.frustumCulled = ghosts.frustumCulled = false;
-    occluder.renderOrder = 0;
-    points.renderOrder = 1;
-    ghosts.renderOrder = 2;
-    this.scene.add(occluder, points, ghosts);
+    const inst = this.inst = {
+      iPos: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * 3), 3),
+      iAxis: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * 4), 4),
+      iCol: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * 3), 3),
+      iParam: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * 4), 4),
+    };
+    const quads = this.quads = new THREE.InstancedBufferGeometry().copy(new THREE.PlaneGeometry(2, 2));
+    for (const [name, attr] of Object.entries(inst)) {
+      attr.setUsage(THREE.DynamicDrawUsage);
+      quads.setAttribute(name, attr);
+    }
+    quads.instanceCount = 0;
+
+    const one = THREE.OneFactor;
+    this.blobUniforms = { uRadius: { value: AGENT_RADIUS }, uExtent: { value: EXTENT }, uK: { value: SMOOTH_K },
+      uNear: { value: 0.9 } };
+    const blobs = new THREE.Mesh(quads, new THREE.ShaderMaterial({
+      glslVersion: THREE.GLSL3, uniforms: this.blobUniforms, vertexShader: blobVert, fragmentShader: blobFrag,
+      depthTest: false, depthWrite: false, transparent: true, blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation, blendSrc: one, blendDst: one, blendSrcAlpha: one, blendDstAlpha: one,
+    }));
+    blobs.frustumCulled = false;
+    this.blobScene = new THREE.Scene().add(blobs);
+
+    const pass = (fragmentShader, uniforms) => {
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+        glslVersion: THREE.GLSL3, uniforms, vertexShader: screenVert, fragmentShader, depthTest: false, depthWrite: false,
+      }));
+      mesh.frustumCulled = false;
+      return new THREE.Scene().add(mesh);
+    };
+    this.resolveUniforms = { tColor: { value: null }, tField: { value: null }, tPrev: { value: null },
+      uK: { value: SMOOTH_K }, uDecay: { value: 0.95 } };
+    this.grainUniforms = { tTrail: { value: null }, uTime: { value: 0 },
+      uBg: { value: new THREE.Color(BG).convertLinearToSRGB() } };
+    this.resolveScene = pass(resolveFrag, this.resolveUniforms);
+    this.grainScene = pass(grainFrag, this.grainUniforms);
 
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -136,84 +84,107 @@ export class Plate {
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
+    // Keep the whole front face of the box in view on narrow windows too.
+    this.camera.fov = w / h < 1.25 ? 2 * Math.atan(Math.tan((FOV * Math.PI) / 360) * 1.25 / (w / h)) * 180 / Math.PI : FOV;
     this.camera.updateProjectionMatrix();
-    this.uniforms.uDpr.value = dpr * Math.max(1, h / 900);
-    this.uniforms.uPx.value = 2 / w;
+
+    // The fields are smooth, so they render at CSS resolution; only the grain needs device pixels.
+    const fw = Math.max(2, Math.round(w * this.quality)), fh = Math.max(2, Math.round(h * this.quality));
+    const opts = { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
+    for (const rt of [this.field, this.trailA, this.trailB]) if (rt) rt.dispose();
+    this.field = new THREE.WebGLRenderTarget(fw, fh, { ...opts, count: 2 });
+    this.trailA = new THREE.WebGLRenderTarget(fw, fh, opts);
+    this.trailB = new THREE.WebGLRenderTarget(fw, fh, opts);
   }
 
-  // Plan's performance fallback: fewer dots per sphere if the frame rate sags.
-  halvePoints() {
-    if (this.pointBudget <= 1500) return false;
-    this.pointBudget = Math.max(1500, this.pointBudget >> 1);
-    this.dots.setDrawRange(0, this.pointBudget);
-    this.uniforms.uLod.value *= 1.6;
+  // Performance fallback: render the fields at lower resolution (the grain stays 1 px).
+  degrade() {
+    if (this.quality <= 0.5) return false;
+    this.quality = Math.max(0.5, this.quality * 0.75);
+    this.resize();
     return true;
   }
 
-  // agents: [{id, x, y, z, vx, vy, vz, E, H, pressure, nx, ny, nz, flags}]
+  // Spring-damper on the squash, so bodies jiggle after impacts instead of snapping.
+  spring(a, dt) {
+    let sp = this.springs.get(a.id);
+    if (!sp) this.springs.set(a.id, sp = { s: 0, v: 0, nx: 1, ny: 0, nz: 0 });
+    const target = Math.min(0.42, a.pressure * 0.8);
+    const steps = Math.max(1, Math.ceil(dt / 0.008));
+    for (let i = 0; i < steps; i++) {
+      const h = dt / steps;
+      sp.v += (SPRING * (target - sp.s) - DAMPING * sp.v) * h;
+      sp.s += sp.v * h;
+    }
+    // Ease the axis toward the current contact normal (an axis has no sign).
+    if (a.nx || a.ny || a.nz) {
+      const sign = sp.nx * a.nx + sp.ny * a.ny + sp.nz * a.nz < 0 ? -1 : 1, k = Math.min(1, dt * 7);
+      sp.nx += (sign * a.nx - sp.nx) * k; sp.ny += (sign * a.ny - sp.ny) * k; sp.nz += (sign * a.nz - sp.nz) * k;
+      const len = Math.hypot(sp.nx, sp.ny, sp.nz) || 1;
+      sp.nx /= len; sp.ny /= len; sp.nz /= len;
+    }
+    return sp;
+  }
+
+  // agents: [{id, x, y, z, E, H, pressure, nx, ny, nz, action}], H is raw happiness.
   render(agents, music, time) {
-    const { iPos, iVel, iSquash, iState } = this.inst;
+    const dt = Math.min(0.05, Math.max(0.001, time - this.lastTime));
+    this.lastTime = time;
+    const { iPos, iAxis, iCol, iParam } = this.inst;
     const n = Math.min(agents.length, this.max);
+    this.scale.update(agents.map((a) => a.H), dt);
+
     for (let i = 0; i < n; i++) {
       const a = agents[i];
-      iPos.setXYZ(i, a.x, a.y, a.z);
-      iVel.setXYZ(i, a.vx, a.vy, a.vz);
-      iSquash.setXYZW(i, a.nx, a.ny, a.nz, a.pressure);
-      iState.setXYZW(i, a.E, a.H, (a.id * 0.6180339) % 1, a.flags || 0);
+      const jitter = ((a.id * 0.6180339) % 1) * 2 - 1;
+      const t = this.scale.map(a.H);
+      const [r, g, b] = happinessColor(t, jitter);
+      const sp = this.spring(a, dt);
+      // Dancers bob on the kick; everyone swells a little with the music.
+      const bob = a.action === 'dance' ? 0.3 * AGENT_RADIUS * music.kickBob * (0.4 + 0.6 * a.E) : 0;
+      const pulse = 1 + 0.08 * music.energy * a.E + 0.12 * music.kickEnv * a.E;
+      iPos.setXYZ(i, a.x, a.y + bob, a.z);
+      iAxis.setXYZW(i, sp.nx, sp.ny, sp.nz, sp.s);
+      iCol.setXYZ(i, r, g, b);
+      // Energy is glow: tired agents are dim and sparse. The happiest, most energetic burn white-hot.
+      const hot = Math.max(0, (t - 0.45) / 0.55) ** 1.3 * (0.35 + 0.65 * a.E);
+      const glow = Math.min(1, (0.22 + 0.78 * Math.sqrt(a.E)) * (0.85 + 0.25 * music.energy));
+      iParam.setXYZW(i, glow, Math.min(1, hot * 1.15), pulse, 0);
     }
-    for (const a of [iPos, iVel, iSquash, iState]) a.needsUpdate = true;
-    this.dots.instanceCount = this.body.instanceCount = n;
-    this.updateTrails(agents, n, time);
+    for (const a of [iPos, iAxis, iCol, iParam]) a.needsUpdate = true;
+    this.quads.instanceCount = n;
 
-    this.uniforms.uEnergy.value = music.energy;
-    this.uniforms.uKick.value = music.kickEnv;
-    this.uniforms.uTime.value = time;
-
+    this.pushIn += ((this.pushTarget ? PUSH_IN : 0) - this.pushIn) * Math.min(1, dt * 0.6);
     this.camera.position.set(
       CAMERA.x + DRIFT * Math.sin(time * 0.11),
       CAMERA.y + DRIFT * Math.sin(time * 0.077 + 1.3),
       CAMERA.z + this.pushIn,
     );
-    this.pushIn += ((this.pushTarget ? PUSH_IN : 0) - this.pushIn) * 0.01;
     this.camera.lookAt(LOOK_AT);
-    this.renderer.render(this.scene, this.camera);
+    this.blobUniforms.uNear.value = -this.camera.position.z;
+
+    const gl = this.renderer;
+    // 1. Blobs add into the field.
+    gl.setRenderTarget(this.field);
+    gl.setClearColor(0x000000, 0);
+    gl.clear();
+    gl.render(this.blobScene, this.camera);
+    // 2. Resolve + trails (ping-pong).
+    this.resolveUniforms.tColor.value = this.field.textures[0];
+    this.resolveUniforms.tField.value = this.field.textures[1];
+    this.resolveUniforms.tPrev.value = this.trailA.texture;
+    this.resolveUniforms.uDecay.value = Math.exp(-dt / TRAIL_TAU);
+    gl.setRenderTarget(this.trailB);
+    gl.render(this.resolveScene, this.camera);
+    [this.trailA, this.trailB] = [this.trailB, this.trailA];
+    // 3. Grain to the screen.
+    this.grainUniforms.tTrail.value = this.trailA.texture;
+    this.grainUniforms.uTime.value = time % 1000;
+    gl.setRenderTarget(null);
+    gl.render(this.grainScene, this.camera);
   }
 
-  updateTrails(agents, n, time) {
-    const { iPos, iVel, iSquash, iState } = this.ghostInst;
-    let g = 0;
-    for (let i = 0; i < n && this.trails; i++) {
-      const a = agents[i];
-      let h = this.history.get(a.id);
-      if (!h) this.history.set(a.id, h = []);
-      const lastT = h.length ? h[h.length - 1].t : -1;
-      if (time - lastT > 0.15) {
-        if (time - lastT > 1 || Math.hypot(a.x - h[h.length - 1].x, a.y - h[h.length - 1].y, a.z - h[h.length - 1].z) > 0.2) h.length = 0;
-        h.push({ t: time, x: a.x, y: a.y, z: a.z });
-        while (h.length && h[0].t < time - GHOSTS * GHOST_GAP - 0.5) h.shift();
-      }
-      for (let k = 1; k <= GHOSTS; k++) {
-        // Where the agent was k gaps ago, interpolated between history samples.
-        const want = time - k * GHOST_GAP;
-        let j = h.length - 1;
-        while (j > 0 && h[j - 1].t > want) j--;
-        if (j <= 0 || h[j - 1].t > want) continue;
-        const p = h[j - 1], q = h[j], u = Math.min(1, (want - p.t) / Math.max(1e-3, q.t - p.t));
-        const x = p.x + (q.x - p.x) * u, y = p.y + (q.y - p.y) * u, z = p.z + (q.z - p.z) * u;
-        const moved = Math.hypot(a.x - x, a.y - y, a.z - z);
-        if (moved < 0.025) continue;       // still inside the sphere: nothing to see
-        iPos.setXYZ(g, x, y, z);
-        iVel.setXYZ(g, 0, 0, 0);
-        iSquash.setXYZW(g, 0, 0, 0, 0);
-        iState.setXYZW(g, a.E, a.H, (a.id * 0.6180339 + k * 0.37) % 1, 1 - k / (GHOSTS + 1));
-        g++;
-      }
-    }
-    for (const a of [iPos, iVel, iSquash, iState]) a.needsUpdate = true;
-    this.ghostGeo.instanceCount = g;
-  }
-
-  // World position -> CSS pixels (+ depth and on-screen radius), for the overlay.
+  // World position -> CSS pixels (+ distance and on-screen radius), for the overlay.
   project(x, y, z, out = {}) {
     const v = (this._v ||= new THREE.Vector3()).set(x, y, z);
     const dist = v.distanceTo(this.camera.position);
@@ -222,7 +193,7 @@ export class Plate {
     out.y = (-v.y * 0.5 + 0.5) * innerHeight;
     out.visible = v.z > -1 && v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
     out.dist = dist;
-    out.r = AGENT_RADIUS / dist / Math.tan(Math.PI / 6) * innerHeight * 0.5;
+    out.r = AGENT_RADIUS / dist / Math.tan((this.camera.fov * Math.PI) / 360) * innerHeight * 0.5;
     return out;
   }
 }

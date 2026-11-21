@@ -12,7 +12,7 @@ CELLS = np.stack(np.meshgrid(_g, _g, _g, indexing="ij"), -1).reshape(-1, 3)
 RETARGET_SECONDS = 0.5
 REST_RADIUS = 0.3
 STEP = 0.08
-PRESS_MARGIN = 1.12
+PRESSURE_GAIN = 2.5      # summed overlap (in diameters) -> the renderer's squash amount
 
 
 def _unit(v):
@@ -26,6 +26,11 @@ class Physics:
         n = len(world.agents)
         self.target_age = np.full(n, 1e9)
         self.target_action = [""] * n
+        self.rng = np.random.default_rng(world.seed + 7)
+        self.wander = self.rng.normal(size=(n, 3))     # OU state, unit variance
+        self.nudge = np.zeros((n, 3))
+        self.slow = np.zeros(n)                        # seconds spent below STALL_SPEED
+        self.lively = np.array([C.ARCHETYPE_LIVELINESS[a.archetype] for a in world.agents])
 
     def _targets(self, agents, pos, dt):
         """Target by action; recomputed when the action changes or every 0.5 s."""
@@ -90,35 +95,81 @@ class Physics:
         to = target - pos
         dist = np.linalg.norm(to, axis=1)
         want = _unit(to) * (vmax * np.minimum(1.0, dist / 0.03))[:, None]
+        # Tide: the crowd leans toward the glass when it is loud and eases back when quiet.
+        music = w.music_energy
+        loud = float(np.clip(0.6 * music + 0.4 * (w.w - 0.5) / 1.3, 0.0, 1.0))
+        want *= np.where(act == "push", 0.55 + 0.45 * loud, 1.0)[:, None]    # pushing is half-hearted when it is quiet
+        tide = C.TIDE * (2.0 * loud - 1.0) * (0.4 + 0.6 * k)
+        tide = np.where((act == "rest") | (act == "retreat"), np.minimum(tide, 0.0), tide)
+        fwd = _unit(H0 - pos)
+        want += fwd * tide[:, None]
         vel += (want - vel) * min(1.0, 4.0 * dt)
         speed = np.linalg.norm(vel, axis=1)
         vel *= np.minimum(1.0, vmax / np.maximum(speed, 1e-9))[:, None]
-        start = pos.copy()
-        pos = pos + vel * dt
 
-        # 3. collide: spheres, split by inverse mass, 4 iterations.
-        mass = 0.2 + push * E
+        # Nobody sits still: Ornstein-Uhlenbeck wander, livelier with the music and with energy.
+        self.wander += -self.wander * (dt / C.WANDER_TAU) + np.sqrt(2 * dt / C.WANDER_TAU) * self.rng.normal(size=(n, 3))
+        live = np.maximum(0.30, 0.30 + 0.70 * (0.65 * music + 0.35 * E)) * self.lively
+        drift = C.WANDER_SPEED * live[:, None] * self.wander + self.nudge
+        self.nudge *= np.exp(-dt / C.NUDGE_TAU)
+        # Soft quadratic push away from the walls (half strength at the front glass).
+        m = C.WALL_MARGIN
+        lo = np.clip((m - (pos - R)) / m, 0.0, 1.0) ** 2
+        hi = np.clip((m - (1 - R - pos)) / m, 0.0, 1.0) ** 2
+        lo[:, 2] *= 0.5
+        drift += C.WALL_PUSH * (lo - hi)
+
+        start = pos.copy()
+        pos = pos + (vel + drift) * dt
+
+        # 3. collide: soft springs. Each substep resolves a share of every overlap,
+        # split by inverse mass, so bodies compress and bulge instead of snapping apart.
+        mass = 0.08 + 2.5 * push ** 2 * E
         share = mass[None, :] / (mass[:, None] + mass[None, :])   # i moves by j's share of the mass
         pressure = np.zeros(n)
         normal = np.zeros((n, 3))
         eye = np.eye(n, dtype=bool)
-        for it in range(C.COLLISION_ITERS):
+        pushing = act == "push"
+        # Loosen up when it is quiet: bodies keep a little extra distance, which
+        # the next loud passage squeezes back out.
+        reach = 2 * R * (1.0 + C.PERSONAL_SPACE * (1.0 - loud))
+        for it in range(C.COLLISION_SUBSTEPS):
             diff = pos[:, None] - pos[None]
             dd = np.linalg.norm(diff, axis=-1)
             dd[eye] = 1.0
-            over = np.where(eye, 0.0, np.maximum(0.0, 2 * R - dd))
+            away = diff / dd[..., None]                 # unit vector from j to i
+            over = np.where(eye, 0.0, np.maximum(0.0, reach - dd))
             if it == 0:
-                # Pressure: how hard neighbors press in, with a soft margin so agents
-                # resting in contact still flatten a little against each other.
-                soft = np.where(eye, 0.0, np.maximum(0.0, PRESS_MARGIN * 2 * R - dd))
-                pressure = 0.35 * soft.sum(1) / (2 * R)
-                j = soft.argmax(1)
-                hit = soft.max(1) > 0
-                normal[hit] = -(diff / dd[..., None])[np.arange(n), j][hit]
-            pos = pos + ((diff / dd[..., None]) * (over * share)[..., None]).sum(1) * 0.8
+                pressure = PRESSURE_GAIN * np.where(eye, 0.0, np.maximum(0.0, 2 * R - dd)).sum(1) / (2 * R)
+                j = over.argmax(1)
+                hit = over.max(1) > 0
+                normal[hit] = -away[np.arange(n), j][hit]
+                # Shoulder slip: a pusher blocked by a lighter agent slides around it
+                # instead of deadlocking against it.
+                ahead = -(away * fwd[:, None, :]).sum(-1)                 # how squarely j sits in i's way
+                block = (over > 0) & (ahead > 0.3) & pushing[:, None] & (mass[None, :] < mass[:, None])
+                tang = fwd[:, None, :] + ahead[..., None] * away          # fwd minus its part along the contact
+                tl = np.linalg.norm(tang, axis=-1, keepdims=True)
+                side = np.cross(away, [0.0, 1.0, 0.0]) * np.where(np.arange(n) % 2 == 0, 1.0, -1.0)[:, None, None]
+                tang = np.where(tl > 0.2, tang / np.maximum(tl, 1e-9), _unit(side))
+                slip = (tang * (block * np.minimum(1.0, over / (0.2 * R)))[..., None]).sum(1)
+                sl = np.linalg.norm(slip, axis=1, keepdims=True)
+                slip /= np.maximum(sl, 1.0)
+                pos = pos + slip * (C.SLIP * vmax * dt)[:, None]
+            # Past the cap an overlap is resolved at once: squishy, but still bodies.
+            fix = over * C.COLLISION_RATE + np.maximum(0.0, over * (1 - C.COLLISION_RATE) - C.OVERLAP_CAP * 2 * R)
+            pos = pos + (away * (fix * share)[..., None]).sum(1)
             pos = np.clip(pos, R, 1 - R)      # box walls; the front glass is a wall
+        moved = (pos - start) / dt
         # Collisions bleed into velocity so blocked agents actually slow down.
-        vel = 0.5 * vel + 0.5 * (pos - start) / dt
+        vel = 0.5 * vel + 0.5 * (moved - drift)
+
+        # Anti-stall: anyone nearly motionless for a while gets a decaying nudge.
+        self.slow = np.where(np.linalg.norm(moved, axis=1) < C.STALL_SPEED, self.slow + dt, 0.0)
+        stuck = self.slow > C.STALL_SECONDS
+        if stuck.any():
+            self.nudge[stuck] = _unit(self.rng.normal(size=(int(stuck.sum()), 3))) * C.NUDGE_SPEED
+            self.slow[stuck] = 0.0
 
         # 4. density and proximity
         diff = pos[:, None] - pos[None]
@@ -144,7 +195,7 @@ class Physics:
         w.sim_t += dt
         for i, a in enumerate(agents):
             a.x, a.y, a.z = (float(c) for c in pos[i])
-            a.vx, a.vy, a.vz = (float(c) for c in vel[i])
+            a.vx, a.vy, a.vz = (float(c) for c in moved[i])    # what the eye sees, wander included
             a.E, a.H, a.u = float(E[i]), float(H[i]), float(u[i])
             a.rho, a.v = float(rho[i]), float(v[i])
             a.pressure = 0.6 * a.pressure + 0.4 * float(pressure[i])

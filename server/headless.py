@@ -15,26 +15,39 @@ def main(seconds=240):
     phys = Physics(world)
     dt = 1 / C.PHYSICS_HZ
     t0 = time.time()
+    stats = {True: [], False: []}
+    front = {}
+    speeds = []
     for f in range(int(seconds * C.PHYSICS_HZ)):
         t = f * dt
         loud = (t % 120) > 40                      # 40 s quiet, 80 s loud
         e = 0.85 if loud else 0.15
         world.dsp = {"energy": e, "energy_5s": e}
-        world.w = 0.5 + 2.5 * e                    # temporary DSP proxy for the house ear
+        world.w = 1.8 if loud else 0.8             # roughly what the house ear gives for drop / breakdown
         world.t = t
         if f % int(C.TICK_SECONDS * C.PHYSICS_HZ) == 0:
             shove.apply(world)
         phys.step(dt)
+        a = world.agents
+        if f % C.PHYSICS_HZ == 0 and t > 20:
+            speeds.append(np.mean([np.linalg.norm((x.vx, x.vy, x.vz)) for x in a]))
+            # Compare the settled ends of each phase.
+            if (t % 120) > 90 or 20 < (t % 120) <= 40:
+                stats[loud].append(np.mean([x.v for x in a]))
+                for x in a:
+                    front.setdefault(x.archetype, []).append(x.v)
         if f % (10 * C.PHYSICS_HZ) == 0:
-            a = world.agents
             acts = {}
             for x in a:
                 acts[x.action] = acts.get(x.action, 0) + 1
             print(f"t={t:5.0f} {'LOUD ' if loud else 'quiet'} v={np.mean([x.v for x in a]):.2f} "
-                  f"front10_v={np.mean(sorted(x.v for x in a)[-10:]):.2f} E={np.mean([x.E for x in a]):.2f} "
-                  f"H={np.mean([x.H for x in a]):.2f} Hmax={max(x.H for x in a):.2f} "
-                  f"rho={np.mean([x.rho for x in a]):.2f} press={max(x.pressure for x in a):.2f} "
-                  f"exh={world.exhaustion_events} {acts}")
+                  f"E={np.mean([x.E for x in a]):.2f} H={np.mean([x.H for x in a]):.3f} "
+                  f"rho={np.mean([x.rho for x in a]):.2f} press={np.mean([x.pressure for x in a]):.2f}/"
+                  f"{max(x.pressure for x in a):.2f} exh={world.exhaustion_events} {acts}")
+    print(f"mean_v loud {np.mean(stats[True]):.3f}  quiet {np.mean(stats[False]):.3f}  "
+          f"gap {np.mean(stats[True]) - np.mean(stats[False]):.3f}")
+    print("mean_v by archetype:", {k: round(float(np.mean(v)), 3) for k, v in front.items()})
+    print(f"mean speed {np.mean(speeds):.3f}, slowest second {np.min(speeds):.3f}")
     print(f"{seconds}s simulated in {time.time() - t0:.1f}s "
           f"({(time.time() - t0) / (seconds * C.PHYSICS_HZ) * 1000:.2f} ms/step)")
 

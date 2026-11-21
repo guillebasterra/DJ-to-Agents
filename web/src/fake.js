@@ -1,6 +1,6 @@
 // Dev mode (?fake=1): random-walk agents and fake decisions, no backend.
 // Emits the same init / physics / decision messages as the server.
-const N = 100, R = 0.06, HZ = 30;
+const N = 100, R = 0.075, HZ = 30;
 const ACTIONS = ['hold', 'push', 'yield', 'rest', 'dance'];
 const LINES = ['let me in, this drop is everything to me', 'can I squeeze past? I have waited all night',
   'please, one step, I need the front', 'you look tired, swap with me?', 'I yielded to you before, my turn'];
@@ -10,7 +10,7 @@ export function connect(handlers) {
   const agents = [];
   for (let i = 0; i < N; i++) {
     agents.push({ id: i, x: rand(0.05, 0.95), y: rand(0.05, 0.95), z: rand(0.05, 0.95), vx: 0, vy: 0, vz: 0,
-      E: rand(0.2, 1), H: Math.random(), action: ACTIONS[i % 5], pressure: 0, nx: 0, ny: 0, nz: 0,
+      E: rand(0.1, 1), H: rand(0.02, 0.2), action: ACTIONS[i % 5], pressure: 0, nx: 0, ny: 0, nz: 0,
       pull: Math.random() });
   }
   handlers.init({ type: 'init', n_lanes: 10, agents: agents.map((a) => ({ id: a.id, archetype: 'between',
@@ -26,7 +26,7 @@ export function connect(handlers) {
       a.vy += (rand(-1, 1) * 0.08 + (0.5 - a.y) * 0.05 * a.pull - a.vy) * dt * 2;
       a.vz += (rand(-1, 1) * 0.08 + (0.0 - a.z) * 0.06 * a.pull - a.vz) * dt * 2;
       a.x += a.vx * dt; a.y += a.vy * dt; a.z += a.vz * dt;
-      a.H = Math.min(1, Math.max(0, a.H + rand(-1, 1) * 0.01));
+      a.H = Math.min(0.25, Math.max(0.01, a.H + rand(-1, 1) * 0.002));
       a.E = Math.min(1, Math.max(0.05, a.E + rand(-1, 1) * 0.005));
       a.pressure = 0; a.best = 0;
     }
@@ -36,7 +36,7 @@ export function connect(handlers) {
         const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
         const d = Math.hypot(dx, dy, dz) || 1e-6, over = 2 * R - d;
         if (over <= 0) continue;
-        const ux = dx / d, uy = dy / d, uz = dz / d, h = over * 0.25;
+        const ux = dx / d, uy = dy / d, uz = dz / d, h = over * 0.12;
         a.x -= ux * h; a.y -= uy * h; a.z -= uz * h;
         b.x += ux * h; b.y += uy * h; b.z += uz * h;
         const p = over / (2 * R);
@@ -88,5 +88,6 @@ export function fakeMusic(f, now) {
   const beat = (now * 2) % 1;
   f.energy = 0.55 + 0.4 * Math.sin(now * 0.3);
   f.kickEnv = f.energy > 0.4 ? Math.exp(-beat * 0.5 / 0.06) : 0;
+  f.kickBob = f.energy > 0.4 ? Math.exp(-beat * 0.5 / 0.14) : 0;
   return f;
 }

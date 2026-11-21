@@ -80,7 +80,8 @@ export function initUI({ audio, net, overlay, state }) {
 
   // Dev hook for scripted runs: ?track=0 starts the first track without the
   // picker (needs a browser that allows autoplay, e.g. headless Chrome);
-  // &condition=silent&reset=1 sets the condition and resets the crowd first.
+  // &condition=silent&reset=1 sets the condition and resets the crowd first;
+  // &t=120 starts 120 s into the track.
   const params = new URLSearchParams(location.search);
   if (params.has('track')) {
     const [path, url] = Object.entries(trackUrls)[+params.get('track')] || [];
@@ -88,7 +89,11 @@ export function initUI({ audio, net, overlay, state }) {
       if (!net.open) return setTimeout(start, 100);
       if (params.has('condition')) net.send({ type: 'control', condition: params.get('condition') });
       if (params.has('reset')) net.send({ type: 'control', action: 'reset' });
-      if (url) choose('file', url, path.split('/').slice(-1)[0]);
+      if (url) {
+        choose('file', url, path.split('/').slice(-1)[0]).then(() => {
+          if (params.has('t') && audio.source.el) audio.source.el.currentTime = +params.get('t');   // start mid-track
+        });
+      }
     };
     start();
   }

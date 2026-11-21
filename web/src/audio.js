@@ -3,6 +3,7 @@
 const FFT = 2048;
 const KICK_REFRACTORY = 0.12;
 const KICK_DECAY = 0.06;
+const BOB_DECAY = 0.14;     // the slower envelope dancers bob on
 
 // Each source maker returns {node, monitor, label, time(), playing(), stop()}.
 export const sources = {
@@ -56,7 +57,7 @@ export class AudioEngine {
     this.lastBass = 0;
     this.history = [];   // [audio time, energy], last 10 s of playback
     this.kicks = 0;      // kicks since the last clock message
-    this.features = { sub: 0, bass: 0, mid: 0, high: 0, rms: 0, kick: false, kickEnv: 0,
+    this.features = { sub: 0, bass: 0, mid: 0, high: 0, rms: 0, kick: false, kickEnv: 0, kickBob: 0,
       energy: 0, energy_5s: 0, trend: 0, bass_gap: 0 };
   }
 
@@ -119,6 +120,7 @@ export class AudioEngine {
     }
     f.kick = false;
     f.kickEnv = this.lastKick < 0 ? 0 : Math.exp(-(now - this.lastKick) / KICK_DECAY);
+    f.kickBob = this.lastKick < 0 ? 0 : Math.exp(-(now - this.lastKick) / BOB_DECAY);
     if (!playing) return f;
 
     const { analyser, freq, wave, max } = this;
@@ -158,6 +160,7 @@ export class AudioEngine {
       this.kicks++;
       f.kick = true;
       f.kickEnv = 1;
+      f.kickBob = 1;
     }
 
     f.energy = 0.6 * f.bass + 0.4 * f.rms;

@@ -40,7 +40,7 @@ export class Overlay {
       for (const a of agents) {
         plate.project(a.x, a.y, a.z, p);
         if (!p.visible) continue;
-        g.globalAlpha = 0.55 * Math.min(1, Math.max(0.25, 1.5 - p.dist));
+        g.globalAlpha = 0.55 * Math.min(1, Math.max(0.3, 2.3 - p.dist));
         g.fillText(`A${a.id}`, p.x + p.r * 0.75 + 2, p.y - p.r * 0.75);
       }
     }
@@ -48,6 +48,7 @@ export class Overlay {
     // Ask threads go on top of everything.
     g.font = "10px 'IBM Plex Mono', monospace";
     g.lineWidth = 1;
+    const placed = [];     // text boxes drawn this frame, so asks never print over each other
     for (const [id, th] of this.threads) {
       const age = now - th.born;
       const from = byId.get(th.from), to = byId.get(th.to);
@@ -70,11 +71,19 @@ export class Overlay {
         g.lineTo(mx + dy / len * 5, my - dx / len * 5);
       }
       g.stroke();
-      const label = th.answer === 'pending' ? th.text : `${th.text}  [${th.answer}]`;
-      // Keep the text on screen even when the asker is at the edge.
+      // The sentence shows while the ask is open; once answered only the verdict stays.
+      const label = th.answer === 'pending' ? th.text : `[${th.answer}]`;
+      // Keep the text on screen, and step it down past any text already there.
       const tw = g.measureText(label).width;
-      g.fillText(label, Math.max(8, Math.min(innerWidth - tw - 8, p.x + 8)),
-        Math.max(12, Math.min(innerHeight - 12, p.y + 12)));
+      const tx = Math.max(8, Math.min(innerWidth - tw - 8, p.x + 8));
+      let ty = Math.max(12, Math.min(innerHeight - 12, p.y + 12));
+      for (let tries = 0; tries < 12; tries++) {
+        const hit = placed.find((b) => Math.abs(b.y - ty) < 13 && tx < b.x + b.w + 6 && b.x < tx + tw + 6);
+        if (!hit) break;
+        ty = hit.y + 13;
+      }
+      placed.push({ x: tx, y: ty, w: tw });
+      g.fillText(label, tx, ty);
     }
     g.globalAlpha = 1;
   }

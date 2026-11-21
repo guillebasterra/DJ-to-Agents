@@ -12,9 +12,13 @@ no reading ahead. Built at the Gemini 4 NYC hackathon. See `plan.md` for the ful
 - **Gemini 4 Neon**: reads the run summary and sampled asks after the runs and writes `out/report.md`.
 - Three conditions on the same audio: `shove` (scripted, no model), `silent` (Decisions only), `talk` (all).
 
-The screen is the DJ's view: each agent is a stippled point-cloud sphere. Color is happiness (blue, red,
-off-white, mixed dot by dot), dot density is energy, the pulse follows the music, and spheres flatten where
-they press on each other.
+The screen is the DJ's view into the box: each agent is a glowing, grainy sphere. Hue is happiness (teal for
+the least happy, warm orange for the happy, a white-hot core at the top), glow is energy, the pulse follows
+the music, and bodies squash, bulge and merge their glow where they press on each other.
+
+![reference, a quiet moment, a loud moment](docs/rework_compare.png)
+
+Left: the look reference (`docs/ref/looopism.gif`). Middle: a breakdown (171 s). Right: the drop (189 s).
 
 ## Run
 
@@ -78,13 +82,50 @@ Three headline numbers:
    a breakdown against 60% under scripted shoving, with zero exhaustion events. Mean happiness was no better
    than shove, though (0.065 vs 0.071), at about 65 times the tokens.
 
-One run per condition, so small differences are noise; `out/report.md` lists the caveats. Reciprocity could
+These three runs were recorded before the visual + physics rework below (smaller, slower agents, hard
+collisions); they have not been re-recorded. One run per condition, so small differences are noise; `out/report.md` lists the caveats. Reciprocity could
 not be measured (only 11 asks came from someone who had yielded to the blocker before).
 
 ![anticipation](out/anticipation.png)
 ![ring agreement](out/ring_agreement.png)
 
 ## Decisions made
+
+### Visual + physics rework (replaces the renderer and collision notes further down)
+
+- Renderer: one billboard per agent (a screen-space sphere impostor) instead of point clouds. Pass 1 adds
+  every blob's `exp(-k * sdf)` into a half-float field; pass 2 takes `-log / k` of the sum, which is a
+  smooth-min of the distance fields, so touching blobs bulge into each other and share glow and halo while
+  each keeps its body; pass 3 turns alpha into fine 1 px grain at device resolution. Faces, trail ghosts,
+  the chromatic fringe and the occluder bodies are gone. 60 fps; if it drops below 50 the field resolution
+  steps down (the grain stays 1 px).
+- Where blobs overlap on screen, color is a weighted average with weight `exp(-14 * depth)`, so the nearer
+  body wins and stays readable. That is ordering by weight, not a depth buffer.
+- Grain: each pixel has a fixed hash threshold that drifts at its own slow rate. It shimmers, never flickers,
+  and no shape is resampled per frame.
+- Trails: the resolved image is kept in an accumulation buffer, `max(current, previous * decay)` with a
+  0.55 s time constant, so stationary blobs don't thicken and moving ones leave a fading grainy smear.
+- Color: happiness is mapped over the crowd's own spread (smoothed p05-p95, 55%) blended with an absolute
+  anchor (45%), then an S-curve, onto teal -> cyan -> a narrow pale band -> orange -> red-orange, with +-8
+  degrees of hue jitter per agent. A straight hue sweep from teal to orange would pass through green.
+  Energy sets glow: tired agents fade toward the background grey and their halo thins.
+- Camera sits at z = -1.2 with a 50 degree lens (plan: -0.35, 60 degrees), so the whole box fits with margin.
+- Squash is a spring-damper per agent in the renderer (stiffness 150, damping 9, underdamped), driven by
+  the backend's contact pressure and normal, so blobs wobble after impacts.
+- Dancers' kick bob (140 ms envelope) is done in the renderer, not the backend: the backend only sees kicks
+  through the 4 Hz clock, which is too coarse to bob on.
+- Physics: agent radius 0.075 (was 0.06), max speed 0.11 (was 0.06). Always-on Ornstein-Uhlenbeck wander
+  (tau 1.6 s; dancer 1.6x, between 1.0x, diehard 0.55x), anti-stall nudge, soft quadratic wall push (half
+  strength at the front glass), soft spring collisions (0.14 per substep, 3 substeps, overlap capped at 25%
+  of a diameter), mass = 0.08 + 2.5 * pushiness^2 * E, and a tangential shoulder slip for a pusher blocked
+  by a lighter agent.
+- To get a clear loud / quiet contrast, three rules were added that apply equally in every condition: a
+  "tide" (everyone leans toward the glass when loud and eases back when quiet, scaled by keenness), pushing
+  at 55% strength in silence, and 16% extra personal space in quiet passages. On the synthetic schedule
+  (`python -m server.headless`) mean proximity is 0.57 loud vs 0.48 quiet (gap 0.10) and diehards hold the
+  front (0.61 vs 0.53 between, 0.46 dancers). Agents' rewards and prompts are unchanged.
+- Overlay: an ask's sentence shows while it is open; once answered only `[yes]` / `[no]` stays, and texts
+  step down instead of printing over each other.
 
 - Python venv is created with `uv` (Python 3.11); the plan assumed it already existed.
 - Renderer: one set of 20,000 dots per sphere instead of four sets of 3,000. The dots are sampled over the
@@ -151,7 +192,8 @@ What broke or surprised us along the way (details under "Decisions made"):
 - With the plan's bare prompt all 100 agents chose `dance` forever; traits only mattered once the prompt
   said what they mean.
 - The plan's energy costs exhausted the whole crowd in under a minute.
-- 3,000 dots per sphere looked empty up close; the renderer went to 20,000 camera-facing dots.
+- The first renderer (stippled point clouds, 20,000 dots per sphere) read as noisy and was replaced by the
+  field-based glow renderer.
 - The house ear is not ground truth: on identical audio it called three drops in two runs and one in the third.
 - Not done: live Rekordbox input is wired and tested against a fake device only, the demo video link is not
   in the repo (the clip contains the track), and Neon is a single call rather than a Managed Agent.
