@@ -74,7 +74,7 @@ export function connect(handlers) {
       pending.push(id);
       asks.push({ id, from: from.id, to: to.id, text: LINES[qid % LINES.length], answer: 'pending' });
     }
-    handlers.decision({ type: 'decision', t, condition: 'talk', tick,
+    handlers.decision({ type: 'decision', t, condition: 'talk', tick, house: { section: tick % 8 > 5 ? 'drop' : 'groove', w: 1 },
       rings: { 1: { section: 'build', drop_eta: 'next_8_bars', p: 0.72 } }, asks, answers });
   };
 

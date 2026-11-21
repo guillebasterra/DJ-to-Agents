@@ -12,6 +12,10 @@ const POINTS_PER_SPHERE = 20000;
 const CAMERA = new THREE.Vector3(0.5, 0.5, -0.35);
 const LOOK_AT = new THREE.Vector3(0.5, 0.5, 0.5);
 const DRIFT = 0.03;
+const GHOSTS = 3;              // trail ghosts per agent
+const GHOST_POINTS = 2500;
+const GHOST_GAP = 0.9;         // seconds between ghosts
+const PUSH_IN = 0.07;         // camera creeps toward the glass on the drop
 
 const glsl = (src) => src.replace('#include deform', deform);
 
@@ -68,7 +72,7 @@ export class Plate {
     const rgb = (hex) => new THREE.Color(hex).convertLinearToSRGB();
     this.uniforms = {
       uRadius: { value: AGENT_RADIUS }, uEnergy: { value: 0 }, uKick: { value: 0 },
-      uDpr: { value: 1 }, uLod: { value: 0.55 }, uTime: { value: 0 },
+      uDpr: { value: 1 }, uLod: { value: 0.55 }, uTime: { value: 0 }, uFaces: { value: 1 }, uPx: { value: 0.001 },
       uLight: { value: new THREE.Vector3(-0.55, 0.6, 0.58).normalize() },
       uBg: { value: rgb(BG) }, uBlue: { value: rgb(BLUE) }, uRed: { value: rgb(RED) }, uWhite: { value: rgb(WHITE) },
     };
@@ -92,10 +96,35 @@ export class Plate {
     const points = new THREE.Points(dots, new THREE.ShaderMaterial({
       uniforms: this.uniforms, vertexShader: glsl(pointsVert), fragmentShader: pointsFrag,
     }));
-    occluder.frustumCulled = points.frustumCulled = false;
+    // Trails: a few past positions per agent as faint, sparse ghosts. They reuse
+    // the first GHOST_POINTS dots and are hidden by any body in front of them.
+    const gInst = this.ghostInst = {
+      iPos: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * GHOSTS * 3), 3),
+      iVel: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * GHOSTS * 3), 3),
+      iSquash: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * GHOSTS * 4), 4),
+      iState: new THREE.InstancedBufferAttribute(new Float32Array(maxAgents * GHOSTS * 4), 4),
+    };
+    const ghostGeo = this.ghostGeo = new THREE.InstancedBufferGeometry();
+    ghostGeo.setAttribute('position', dots.getAttribute('position'));
+    ghostGeo.setAttribute('aRnd', dots.getAttribute('aRnd'));
+    for (const [name, attr] of Object.entries(gInst)) {
+      attr.setUsage(THREE.DynamicDrawUsage);
+      ghostGeo.setAttribute(name, attr);
+    }
+    ghostGeo.setDrawRange(0, GHOST_POINTS);
+    ghostGeo.instanceCount = 0;
+    const ghosts = new THREE.Points(ghostGeo, new THREE.ShaderMaterial({
+      uniforms: this.uniforms, vertexShader: '#define GHOST\n' + glsl(pointsVert), fragmentShader: pointsFrag,
+    }));
+    this.history = new Map();   // agent id -> [{t, x, y, z}], newest last
+    this.trails = true;
+    this.pushTarget = 0;
+
+    occluder.frustumCulled = points.frustumCulled = ghosts.frustumCulled = false;
     occluder.renderOrder = 0;
     points.renderOrder = 1;
-    this.scene.add(occluder, points);
+    ghosts.renderOrder = 2;
+    this.scene.add(occluder, points, ghosts);
 
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -109,6 +138,7 @@ export class Plate {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.uniforms.uDpr.value = dpr * Math.max(1, h / 900);
+    this.uniforms.uPx.value = 2 / w;
   }
 
   // Plan's performance fallback: fewer dots per sphere if the frame rate sags.
@@ -133,6 +163,7 @@ export class Plate {
     }
     for (const a of [iPos, iVel, iSquash, iState]) a.needsUpdate = true;
     this.dots.instanceCount = this.body.instanceCount = n;
+    this.updateTrails(agents, n, time);
 
     this.uniforms.uEnergy.value = music.energy;
     this.uniforms.uKick.value = music.kickEnv;
@@ -143,8 +174,43 @@ export class Plate {
       CAMERA.y + DRIFT * Math.sin(time * 0.077 + 1.3),
       CAMERA.z + this.pushIn,
     );
+    this.pushIn += ((this.pushTarget ? PUSH_IN : 0) - this.pushIn) * 0.01;
     this.camera.lookAt(LOOK_AT);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  updateTrails(agents, n, time) {
+    const { iPos, iVel, iSquash, iState } = this.ghostInst;
+    let g = 0;
+    for (let i = 0; i < n && this.trails; i++) {
+      const a = agents[i];
+      let h = this.history.get(a.id);
+      if (!h) this.history.set(a.id, h = []);
+      const lastT = h.length ? h[h.length - 1].t : -1;
+      if (time - lastT > 0.15) {
+        if (time - lastT > 1 || Math.hypot(a.x - h[h.length - 1].x, a.y - h[h.length - 1].y, a.z - h[h.length - 1].z) > 0.2) h.length = 0;
+        h.push({ t: time, x: a.x, y: a.y, z: a.z });
+        while (h.length && h[0].t < time - GHOSTS * GHOST_GAP - 0.5) h.shift();
+      }
+      for (let k = 1; k <= GHOSTS; k++) {
+        // Where the agent was k gaps ago, interpolated between history samples.
+        const want = time - k * GHOST_GAP;
+        let j = h.length - 1;
+        while (j > 0 && h[j - 1].t > want) j--;
+        if (j <= 0 || h[j - 1].t > want) continue;
+        const p = h[j - 1], q = h[j], u = Math.min(1, (want - p.t) / Math.max(1e-3, q.t - p.t));
+        const x = p.x + (q.x - p.x) * u, y = p.y + (q.y - p.y) * u, z = p.z + (q.z - p.z) * u;
+        const moved = Math.hypot(a.x - x, a.y - y, a.z - z);
+        if (moved < 0.025) continue;       // still inside the sphere: nothing to see
+        iPos.setXYZ(g, x, y, z);
+        iVel.setXYZ(g, 0, 0, 0);
+        iSquash.setXYZW(g, 0, 0, 0, 0);
+        iState.setXYZW(g, a.E, a.H, (a.id * 0.6180339 + k * 0.37) % 1, 1 - k / (GHOSTS + 1));
+        g++;
+      }
+    }
+    for (const a of [iPos, iVel, iSquash, iState]) a.needsUpdate = true;
+    this.ghostGeo.instanceCount = g;
   }
 
   // World position -> CSS pixels (+ depth and on-screen radius), for the overlay.

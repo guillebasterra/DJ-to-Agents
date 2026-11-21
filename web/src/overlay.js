@@ -54,6 +54,7 @@ export class Overlay {
       if (age > FADE || !from || !to) { this.threads.delete(id); continue; }
       plate.project(from.x, from.y, from.z, p);
       plate.project(to.x, to.y, to.z, q);
+      if (!p.visible && !q.visible) continue;
       const alpha = Math.min(1, (FADE - age) / 0.8);
       const color = th.answer === 'yes' ? YES : th.answer === 'no' ? RED : WHITE;
       g.globalAlpha = alpha * 0.9;
@@ -70,7 +71,10 @@ export class Overlay {
       }
       g.stroke();
       const label = th.answer === 'pending' ? th.text : `${th.text}  [${th.answer}]`;
-      g.fillText(label, p.x + 8, p.y + 12);
+      // Keep the text on screen even when the asker is at the edge.
+      const tw = g.measureText(label).width;
+      g.fillText(label, Math.max(8, Math.min(innerWidth - tw - 8, p.x + 8)),
+        Math.max(12, Math.min(innerHeight - 12, p.y + 12)));
     }
     g.globalAlpha = 1;
   }

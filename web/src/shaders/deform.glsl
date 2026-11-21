@@ -23,3 +23,8 @@ vec3 deform(vec3 p, vec4 squash, vec3 vel) {
 float pulsedRadius(float E) {
   return uRadius * (1.0 + 0.15 * uEnergy * E + 0.25 * uKick * E);
 }
+
+// Dance hop: dancing agents (flag 1) bob up on the kick.
+vec3 hop(float flags, float E) {
+  return vec3(0.0, abs(flags - 1.0) < 0.5 ? 0.45 * uRadius * uKick * (0.4 + 0.6 * E) : 0.0, 0.0);
+}

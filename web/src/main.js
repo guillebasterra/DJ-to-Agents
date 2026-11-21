@@ -33,6 +33,7 @@ const handlers = {
     state.tick = frame.tick;
     state.asksPerTick = (frame.asks || []).length;
     state.section = frame.house ? frame.house.section : '';
+    plate.pushTarget = state.section === 'drop' ? 1 : 0;   // slow push-in on the drop
     overlay.onDecision(frame, performance.now() / 1000);
   },
 };

@@ -10,6 +10,6 @@ uniform float uRadius, uEnergy, uKick;
 #include deform
 
 void main() {
-  vec3 world = iPos + deform(position * 0.93, iSquash, iVel) * pulsedRadius(iState.x);
+  vec3 world = iPos + hop(iState.w, iState.x) + deform(position * 0.93, iSquash, iVel) * pulsedRadius(iState.x);
   gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
 }
