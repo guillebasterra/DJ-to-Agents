@@ -51,8 +51,26 @@ Decisions accepts raw audio directly, so the Hydrogen perception fallback is not
 - Ring 3's low-pass is 6 kHz, because the plan's 8 kHz is the Nyquist frequency of the 16 kHz stream.
 - Band features are peak-hold envelopes (0.4 s release) of linear band amplitude, so `energy` reads as a
   loudness level instead of dipping to zero between kicks.
-- Display only: happiness is stretched for color (`1 - exp(-4H)`) because the plan's u / 3 keeps real H mostly
+- Display only: happiness is stretched for color (`1 - exp(-6H)`) because the plan's u / 3 keeps real H mostly
   below 0.5. Logs and analysis use the raw H.
+- Energy constants tuned (the plan allows it): a = 0.012, b = 0.006, d = 0.002, c = 0.050. With the plan's
+  values the whole crowd was exhausted about 50 s into the track and never recovered.
+- Agent prompt: the plan's template plus one line saying what the traits mean and one line of game rules
+  (the front pays off at the drop; pushing, dancing and the crush drain energy; rest restores it; at energy 0
+  you are carried to the back). Without it every agent chose `dance` on every tick, whatever its traits.
+- Crowded rings are split into calls of at most 50 agents, run in parallel.
+- Drop onset = "drop" becomes the house ear's top section after build or breakdown was the top section.
+  The plan's p > 0.5 thresholds never fired: with seven options the top probability sits around 0.35-0.5.
+  For the same reason w tops out near 1.8 instead of 3.
+- Ask answers are sampled: the blocker says yes with probability p (seeded RNG) instead of the plan's
+  p >= 0.5 cut-off. With the cut-off, 0 of 108 asks got a yes, although p clearly moved with traits, wording
+  and yield history (0.11 to 0.41). The answer prompt also states that stepping aside takes about 2 s.
+- Asks are also pushed to the client the moment Hydrogen returns (`{"type":"asks"}`), not only in the next
+  decision frame. An asker waits for its answer before asking again; a pair waits 3 ticks before a repeat.
+- Hydrogen asks have their own concurrency lane (8) so they never queue in front of the ring calls.
+- Scripted runs: `tools/headless_run.py` drives the real web client in headless Chrome against a built copy
+  served by the backend at `/app` (`cd web && npx vite build --base=/app/`), so dev-server hot reloads can't
+  restart a run. `tools/run_all.sh` records shove, silent and talk back to back on the same track and seed.
 
 ## Credits
 

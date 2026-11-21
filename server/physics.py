@@ -75,6 +75,10 @@ class Physics:
         k = np.array([a.k for a in agents])
         s = np.array([a.s for a in agents])
         push = np.array([a.pushiness for a in agents])
+        for a in agents:
+            # An accepted ask means stepping aside for 2 s, then holding.
+            if a.action == "yield" and a.yield_until and w.sim_t >= a.yield_until:
+                a.action, a.yield_until = "hold", 0.0
         act = np.array([a.action for a in agents])
 
         # 1. targets

@@ -36,7 +36,7 @@ void main() {
   // Stipple: lit sides dense, shadow sides sparse, a speckled rim, a thin halo.
   float dens = 0.03 + 0.97 * pow(smoothstep(0.0, 0.9, lam), 1.3) + 0.08 * rim;
   dens *= mix(1.0, 0.45, halo);
-  dens *= 0.2 + 0.8 * E;                         // tired agents are ghostly
+  dens *= 0.35 + 0.65 * E;                        // tired agents are ghostly
   dens *= 0.6 + 0.4 * smoothstep(0.0, 0.5, H);   // unhappy agents are sparse
   dens *= 1.0 - 0.6 * fog;
   dens *= clamp(uLod / (dist * dist), 0.0, 1.0); // even screen coverage near and far

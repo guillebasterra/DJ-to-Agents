@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from . import config as C, tick
 from .audio import AudioBuffer
@@ -29,6 +30,9 @@ class Session:
         self.run = RunLog(self.world)
         self.clients = set()
         self.last_clock = 0.0
+        self.tasks = set()    # in-flight Hydrogen asks
+        self.generation = 0   # bumped when the run changes, so stale asks are dropped
+        self.services = {}    # long-lived helpers (the Gemini client)
         self.memo = {}        # scratch state for the tick modules (word of mouth, pending asks)
 
     @property
@@ -36,6 +40,7 @@ class Session:
         return self.world.playing and time.time() - self.last_clock < CLOCK_TIMEOUT
 
     def new_run(self):
+        self.generation += 1
         self.run.close()
         self.run = RunLog(self.world)
 
@@ -167,6 +172,13 @@ async def ws(sock: WebSocket):
         pass
     finally:
         S.clients.discard(sock)
+
+
+# A built copy of the web client (cd web && npx vite build --base=/app/), used by
+# scripted runs so they don't reload when the dev server hot-updates.
+_dist = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "dist")
+if os.path.isdir(_dist):
+    app.mount("/app", StaticFiles(directory=_dist, html=True), name="app")
 
 
 if __name__ == "__main__":

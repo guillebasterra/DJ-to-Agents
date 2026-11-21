@@ -55,12 +55,19 @@ export function initUI({ audio, net, overlay, state }) {
     else if (k === 'escape') picker.hidden = true;
   });
 
-  // Dev hook: ?track=0 starts the first track without the picker (needs a
-  // browser that allows autoplay, e.g. headless test runs).
-  const auto = new URLSearchParams(location.search).get('track');
-  if (auto !== null) {
-    const [path, url] = Object.entries(trackUrls)[+auto] || [];
-    if (url) choose('file', url, path.split('/').slice(-1)[0]);
+  // Dev hook for scripted runs: ?track=0 starts the first track without the
+  // picker (needs a browser that allows autoplay, e.g. headless Chrome);
+  // &condition=silent&reset=1 sets the condition and resets the crowd first.
+  const params = new URLSearchParams(location.search);
+  if (params.has('track')) {
+    const [path, url] = Object.entries(trackUrls)[+params.get('track')] || [];
+    const start = () => {
+      if (!net.open) return setTimeout(start, 100);
+      if (params.has('condition')) net.send({ type: 'control', condition: params.get('condition') });
+      if (params.has('reset')) net.send({ type: 'control', action: 'reset' });
+      if (url) choose('file', url, path.split('/').slice(-1)[0]);
+    };
+    start();
   }
 
   return {

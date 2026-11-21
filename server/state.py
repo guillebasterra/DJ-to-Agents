@@ -88,6 +88,7 @@ class World:
 
     def reset(self):
         self.agents = make_agents(self.seed)
+        self.rng = np.random.default_rng(self.seed + 1000)   # for sampled ask answers
         # yielded_to[a][b]: how many times a yielded to b.
         self.yielded_to = np.zeros((C.N_AGENTS, C.N_AGENTS), dtype=int)
         self.w = 1.0                 # the house ear's expected section weight

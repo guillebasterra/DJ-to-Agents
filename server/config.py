@@ -27,10 +27,12 @@ DENSITY_CAP = 12
 CONTAGION_RADIUS = 3.0 * AGENT_RADIUS
 
 # Energy, per second.
-E_FRONT = 0.022   # a: front crush
-E_PUSH = 0.010    # b
-E_DANCE = 0.008   # d
-E_REST = 0.033    # c: rest recovery
+# Tuned from the plan's a = 0.022, b = 0.010, d = 0.008, c = 0.033: with those
+# the whole crowd was exhausted about 50 s into a track and never recovered.
+E_FRONT = 0.012   # a: front crush
+E_PUSH = 0.006    # b
+E_DANCE = 0.002   # d
+E_REST = 0.050    # c: rest recovery
 E_RECOVERED = 0.3
 
 H_TAU = 10.0

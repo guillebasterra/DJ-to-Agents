@@ -66,7 +66,7 @@ export class AudioEngine {
     this.analyser = new AnalyserNode(ctx, { fftSize: FFT, smoothingTimeConstant: 0 });
     this.freq = new Float32Array(FFT / 2);
     this.wave = new Float32Array(FFT);
-    await ctx.audioWorklet.addModule('/capture-worklet.js');
+    await ctx.audioWorklet.addModule(import.meta.env.BASE_URL + 'capture-worklet.js');
     this.worklet = new AudioWorkletNode(ctx, 'capture', { numberOfOutputs: 1 });
     this.worklet.port.onmessage = (e) => {
       if (!this.playing) return;

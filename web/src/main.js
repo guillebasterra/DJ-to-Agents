@@ -27,6 +27,7 @@ const handlers = {
     cur = new Map();
     for (const a of frame.agents) cur.set(a[0], a);
   },
+  asks(frame) { overlay.onDecision(frame, performance.now() / 1000); },
   decision(frame) {
     state.condition = frame.condition;
     state.tick = frame.tick;
@@ -46,7 +47,7 @@ setInterval(() => { if (audio.source) net.send(audio.clock()); }, 250);
 
 // Real happiness mostly lives in 0..0.5 (u is divided by 3), so stretch it
 // over the whole blue -> red -> white range for display only.
-const showH = (h) => 1 - Math.exp(-4 * h);
+const showH = (h) => 1 - Math.exp(-6 * h);
 const lerp = (a, b, t) => a + (b - a) * t;
 let fps = 60, last = performance.now() / 1000, slowSince = 0;
 
