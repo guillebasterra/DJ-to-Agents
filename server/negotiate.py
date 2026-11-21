@@ -14,9 +14,8 @@ from .decide import DOING
 log = logging.getLogger("negotiate")
 
 CONE_COS = float(np.cos(np.radians(35.0)))
-BLOCK_DIST = 2.2 * C.AGENT_RADIUS
+BLOCK_REACH = 1.1          # blocked = within 1.1 x the two radii
 PAIR_COOLDOWN_TICKS = 3
-H0 = np.array(C.H0)
 
 SYSTEM = ("You are one person in a packed crowd at a DJ set. You want to get closer to the DJ, and someone is "
           "in your way. Say one sentence (20 words or fewer), in your own voice, to get them to let you past. "
@@ -38,7 +37,7 @@ def detect(world, memo):
     for a in agents:
         if a.action != "push" or a.exhausted or a.id in waiting:
             continue
-        fwd = H0 - pos[a.id]
+        fwd = C.hot_point(pos[a.id]) - pos[a.id] + [0.0, 0.0, -1e-6]
         fwd /= max(np.linalg.norm(fwd), 1e-9)
         rel = pos - pos[a.id]
         dist = np.linalg.norm(rel, axis=1)
@@ -46,9 +45,11 @@ def detect(world, memo):
         cos = (rel @ fwd) / np.maximum(dist, 1e-9)
         best = None
         for j in np.argsort(dist):
-            if dist[j] > BLOCK_DIST:
-                break
             b = agents[j]
+            if dist[j] > 2.4 * C.AGENT_RADIUS * 1.35:
+                break
+            if dist[j] > BLOCK_REACH * (a.radius + b.radius):
+                continue
             if cos[j] >= CONE_COS and b.action != "yield" and not b.exhausted:
                 best = b
                 break
@@ -131,7 +132,7 @@ def resolve(S, asked, answers):
                 b.yield_until = world.sim_t + 2.0
                 world.yielded_to[b.id][a.id] += 1
             ask["answer"] = "yes" if yes else "no"
-            out.append({"id": ask["id"], "answer": ask["answer"]})
+            out.append({"id": ask["id"], "answer": ask["answer"], "from": a.id, "to": b.id})
             S.run.ask({
                 "id": ask["id"], "t": ask["t"], "tick": ask["tick"], "answered_tick": world.tick,
                 "from": a.id, "to": b.id, "asker_archetype": a.archetype, "blocker_archetype": b.archetype,

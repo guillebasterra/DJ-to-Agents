@@ -12,11 +12,18 @@ MODEL_NEON = os.environ.get("MODEL_NEON", "gemini-4-neon")
 PORT = 8001
 
 # Volume: x left-right, y down-up, z distance from the DJ (z = 0 is the front glass).
-H0 = (0.5, 0.5, 0.0)
-D_MAX = 1.225
+# The hot zone is a band on the front glass (z = 0), not a single point, so
+# the front spreads out instead of making one clump.
+HOT_X = (0.3, 0.7)
+HOT_Y = (0.35, 0.65)
+D_MAX = 1.101             # from the band to the farthest corner of the box
 N_AGENTS = 100
 N_LANES = 10
-AGENT_RADIUS = 0.075     # bigger than the plan's 0.06, so the front visibly packs
+AGENT_RADIUS = 0.07      # base radius (plan: 0.06); each agent scales it by archetype, jitter and energy
+SIZE = {"diehard": 1.2, "between": 1.0, "dancer": 0.85}   # big and heavy ... small and nimble
+SIZE_JITTER = 0.10
+DEFLATE = 0.15            # a tired agent shrinks by up to this much
+GLASS_PRESS = 0.62        # a body can press this close to the glass, as a share of its radius
 PHYSICS_HZ = 30
 TICK_SECONDS = 3.0
 RING_EDGES = (0.25, 0.45, 0.65, 0.85)
@@ -48,10 +55,17 @@ NUDGE_TAU = 0.45
 WALL_MARGIN = 0.14        # soft quadratic push away from the box walls
 WALL_PUSH = 0.05
 SLIP = 0.6                # tangential "shoulder slip" of a blocked pusher, as a share of its max speed
-TIDE = 0.075              # the whole crowd leans toward the glass when loud and eases back when quiet
+TIDE = 0.06               # the whole crowd leans toward the glass when loud and eases back when quiet
+# The house ear's smoothed section probabilities scale movement (never decisions).
+SECTION_TAU = 2.5         # s
+BUILD_DRIFT = 0.05        # forward drift at p(build) = 1
+DROP_PULL = 0.07          # pull to the glass at p(drop) = 1
+BREAK_DRIFT = 0.05        # drift back at p(breakdown) = 1
 PERSONAL_SPACE = 0.16     # in quiet passages everyone keeps this much extra distance (share of a diameter)
 
 H_TAU = 10.0
+U_NORM = 0.75             # H follows u / U_NORM (plan: u / 3, which left mean H at 0.06); calibrated so
+                          # typical H spans about 0.1-0.8
 KAPPA = 0.15
 
 SECTIONS = ("intro", "build", "drop", "groove", "breakdown", "outro", "other")
@@ -75,3 +89,13 @@ CONDITIONS = ("shove", "silent", "talk")
 def constants():
     return {k: v for k, v in globals().items()
             if k.isupper() and not k.startswith("MODEL") and isinstance(v, (int, float, tuple, dict))}
+
+
+def hot_point(pos):
+    """Nearest point of the hot band to each position (numpy, last axis = xyz)."""
+    import numpy as np
+    pos = np.asarray(pos, dtype=float)
+    out = np.zeros_like(pos)
+    out[..., 0] = np.clip(pos[..., 0], *HOT_X)
+    out[..., 1] = np.clip(pos[..., 1], *HOT_Y)
+    return out

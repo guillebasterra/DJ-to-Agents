@@ -16,6 +16,7 @@ class Agent:
     s: float                       # trait: need for space (fixed)
     archetype: str                 # "diehard" | "dancer" | "between"
     lane: int                      # starting column 0..9 on the back wall
+    size: float = 1.0              # body size multiplier (archetype x jitter), fixed
     vx: float = 0.0
     vy: float = 0.0
     vz: float = 0.0
@@ -39,8 +40,14 @@ class Agent:
         return (self.x, self.y, self.z)
 
     @property
+    def radius(self):
+        """Body radius: tired agents deflate."""
+        return C.AGENT_RADIUS * self.size * (1.0 - C.DEFLATE * (1.0 - self.E))
+
+    @property
     def d(self):
-        return float(np.linalg.norm(np.subtract(self.pos, C.H0)))
+        """Distance to the hot band on the glass."""
+        return float(np.linalg.norm(np.subtract(self.pos, C.hot_point(self.pos))))
 
     @property
     def ring(self):
@@ -56,6 +63,7 @@ ARCHETYPES = (("diehard", 0.30, 0.9, 0.1), ("dancer", 0.30, 0.3, 0.9), ("between
 
 def make_agents(seed):
     rng = np.random.default_rng(seed)
+    size_rng = np.random.default_rng(seed + 31)     # separate stream: traits and start positions stay as before
     kinds = []
     for name, share, k, s in ARCHETYPES:
         kinds += [(name, k, s)] * round(share * C.N_AGENTS)
@@ -71,7 +79,8 @@ def make_agents(seed):
         a = Agent(id=i, x=float(x), y=float(y), z=float(z),
                   k=float(np.clip(k + rng.uniform(-0.1, 0.1), 0, 1)),
                   s=float(np.clip(s + rng.uniform(-0.1, 0.1), 0, 1)),
-                  archetype=name, lane=lane)
+                  archetype=name, lane=lane,
+                  size=float(C.SIZE[name] * (1 + size_rng.uniform(-C.SIZE_JITTER, C.SIZE_JITTER))))
         a.target = a.pos
         agents.append(a)
     return agents
@@ -92,6 +101,7 @@ class World:
         # yielded_to[a][b]: how many times a yielded to b.
         self.yielded_to = np.zeros((C.N_AGENTS, C.N_AGENTS), dtype=int)
         self.w = 1.0                 # the house ear's expected section weight
+        self.section_p = {}          # the house ear's latest section probabilities
         self.t = 0.0                 # playback clock from the browser
         self.sim_t = 0.0             # seconds of simulated physics
         self.playing = False
@@ -107,4 +117,4 @@ class World:
     def init_frame(self):
         return {"type": "init", "n_lanes": C.N_LANES, "condition": self.condition,
                 "agents": [{"id": a.id, "archetype": a.archetype, "lane": a.lane,
-                            "k": round(a.k, 3), "s": round(a.s, 3)} for a in self.agents]}
+                            "k": round(a.k, 3), "s": round(a.s, 3), "size": round(a.size, 3)} for a in self.agents]}

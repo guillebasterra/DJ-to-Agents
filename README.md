@@ -12,13 +12,14 @@ no reading ahead. Built at the Gemini 4 NYC hackathon. See `plan.md` for the ful
 - **Gemini 4 Neon**: reads the run summary and sampled asks after the runs and writes `out/report.md`.
 - Three conditions on the same audio: `shove` (scripted, no model), `silent` (Decisions only), `talk` (all).
 
-The screen is the DJ's view into the box: each agent is a glowing, grainy sphere. Hue is happiness (teal for
-the least happy, warm orange for the happy, a white-hot core at the top), glow is energy, the pulse follows
-the music, and bodies squash, bulge and merge their glow where they press on each other.
+The screen is the DJ's view into the box, drawn as pigment on warm paper: each agent is a soft blob. Hue is
+happiness (grey-violet, blue-violet, purple, magenta, red-orange), pigment density is energy, size is
+archetype, and bodies squash, wobble and flatten against the glass. A chat panel on the right shows who is
+asking whom, the answers, and what each ring and the booth think they hear.
 
-![reference, a quiet moment, a loud moment](docs/rework_compare.png)
+![breakdown, build and drop](docs/pass2_moments.png)
 
-Left: the look reference (`docs/ref/looopism.gif`). Middle: a breakdown (171 s). Right: the drop (189 s).
+Top to bottom: a breakdown (170 s), the build (182 s) and the drop (188 s) of the same talk run.
 
 ## Run
 
@@ -51,7 +52,7 @@ Put MP3s in `tracks/` (gitignored). `web/?fake=1` runs the renderer with no back
    the browser microphone permission. Every live session is recorded to `runs/<run>/session.wav` and can be
    replayed from the picker under "Recorded sessions".
 
-Keys: `I` input picker, `space` play/pause, `1/2/3` shove/silent/talk, `L` labels, `D` stats, `R` reset crowd.
+Keys: `space` play/pause, `1/2/3` shove/silent/talk, `C` chat, `L` labels, `D` stats, `I` input picker, `R` reset crowd.
 
 ## API check (phase 0)
 
@@ -82,14 +83,58 @@ Three headline numbers:
    a breakdown against 60% under scripted shoving, with zero exhaustion events. Mean happiness was no better
    than shove, though (0.065 vs 0.071), at about 65 times the tokens.
 
-These three runs were recorded before the visual + physics rework below (smaller, slower agents, hard
-collisions); they have not been re-recorded. One run per condition, so small differences are noise; `out/report.md` lists the caveats. Reciprocity could
+These three runs were recorded before the two rework passes below (single hot spot, smaller and slower
+agents, hard collisions, H = u / 3); they have not been re-recorded, so the numbers describe the old physics. One run per condition, so small differences are noise; `out/report.md` lists the caveats. Reciprocity could
 not be measured (only 11 asks came from someone who had yielded to the blocker before).
 
 ![anticipation](out/anticipation.png)
 ![ring agreement](out/ring_agreement.png)
 
 ## Decisions made
+
+### Visual + feel pass 2 (latest; replaces the renderer notes of the first rework)
+
+- Look: pigment on paper. The paper is #f6ebe6 with drifting +-3.5% grain and a slight vignette; blobs
+  write absorbance and the final pass composites `paper * exp(-A)`. Pigment also gets a slow per-pixel
+  "tooth" (0.78-1.22) so washes look granular. There was no image of the other build's TLC plate in this
+  repo, so the look follows the written spec.
+- Palette: #b9b3c9 -> #6b6eb8 -> #8a3fa0 -> #d12f7a -> #d9481c interpolated in OKLab, +-8 degrees of hue
+  jitter (a rotation in the OKLab a/b plane). Mapping: 56% smoothed crowd p05-p95 (tau 1.4 s) + 44% absolute
+  anchor (H 0.1-0.8), half-strength smoothstep. Density = 0.18 + 1.32 * E.
+- "Touching blobs keep a thin paper gap, never merge": bodies are depth-tested billboards, and the outer 5%
+  of each body is an unpainted rim that still covers what is behind it. That gives the paper gap wherever
+  two bodies touch or overlap on screen. The blobs are not blended with a smooth-min any more: pressing is
+  shown by each body's own deformation (squash along the contact normal with perpendicular bulge, stretch
+  along velocity, three wobble modes).
+- Soft bodies: wobble modes 2, 3 and 4 around the outline, each a spring-damper (13 / 19 / 26 rad/s,
+  damping ratio 0.16-0.22), kicked by impacts (rise in contact pressure), changes of velocity and the kick.
+  Squash and glass press have their own spring-dampers. All of this lives in the renderer.
+- Glass: physics lets a body press to 0.62 of its radius from z = 0; the renderer then widens it up to 30%
+  and adds pigment at the center of the contact. It springs back by 1.2 radii from the glass.
+- Depth: on top of real perspective (camera z = -1.12, 54 degrees), size is scaled 1.28x at the glass down
+  to 0.74x at the back, and pigment fades to 30% at the back, i.e. toward the paper.
+- Trails: `max(current * 0.5, previous * 0.985)` per 1/60 s, with the previous frame scaled 0.16% toward
+  the center of the screen (the vanishing point), so smears drift away from the glass.
+- Happiness: H follows u / 0.75 instead of u / 3 (u / 1.5 still gave a 5-95% range of only 0.06-0.39; with
+  0.75 the headless run spans 0.14-0.83). Logged H and u are the raw values. Agents see their H in the
+  prompt, so decisions can shift with this change.
+- Hot zone: the band x 0.3-0.7, y 0.35-0.65 on the glass. Proximity, rings, push direction, the blocked
+  cone and the tide all use the nearest point of the band. D_MAX is 1.101.
+- Sizes: radius = 0.07 x archetype (diehard 1.2, between 1.0, dancer 0.85) x +-10% jitter x (1 - 0.15 (1 - E)).
+  Collisions use each pair's own radii, mass is multiplied by size squared, and "blocked" means within
+  1.1 x the two radii. The size jitter uses its own RNG stream, so traits and start positions are unchanged.
+- Music scales movement, never decisions: the house ear's section probabilities (smoothed, tau 2.5 s) add
+  forward drift with p(build), a pull to the glass with p(drop), drift back and extra personal space with
+  p(breakdown), and raise max speed by up to 50% (build) / 30% (drop). The renderer adds the bob and sway:
+  everyone bobs on the kick with p(drop), pushers included; sway is slow and gentle in a breakdown.
+- Chat panel: asks appear when Hydrogen returns; each tick adds up to three answers, two notable moves
+  (pushes hard = pushiness >= 0.75, gives up the push, exhausted), one ring's hearing (a different ring each
+  tick) and the booth. The client shows at most 6 lines per tick. Agent ids take the agent's pigment color at
+  the time the line is written.
+- Plate: at most 3 ask threads at once, as a bowed line with a bubble by the asker (sentence cut at 54
+  characters), fading after 3 s. With the chat open the plate is centered in the space left of it.
+- Headless check (`python -m server.headless`, shove, synthetic loud / quiet): mean proximity 0.66 loud vs
+  0.45 quiet (gap 0.21); diehards 0.66, between 0.58, dancers 0.48.
 
 ### Visual + physics rework (replaces the renderer and collision notes further down)
 

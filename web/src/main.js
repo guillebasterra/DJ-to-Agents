@@ -13,11 +13,17 @@ const state = { condition: 'talk', tick: 0, asksPerTick: 0, section: '' };
 
 // Last two physics frames, keyed by agent id, for interpolation.
 let prev = new Map(), cur = new Map(), curAt = 0, frameGap = 1 / 30;
-const view = [];          // interpolated agents, reused every frame
+let sections = [0, 0, 0];   // the house ear's smoothed p(build), p(drop), p(breakdown)
+const view = [];            // interpolated agents, reused every frame
 const byId = new Map();
+let ui = null;
 
 const handlers = {
-  init() { prev = new Map(); cur = new Map(); },
+  init(frame) {
+    prev = new Map(); cur = new Map();
+    if (frame.condition && ui) ui.setMode(frame.condition);
+    else if (frame.condition) state.condition = frame.condition;
+  },
   physics(frame) {
     const now = performance.now() / 1000;
     frameGap = Math.min(0.25, Math.max(1 / 60, 0.8 * frameGap + 0.2 * (now - curAt)));
@@ -25,15 +31,21 @@ const handlers = {
     prev = cur;
     cur = new Map();
     for (const a of frame.agents) cur.set(a[0], a);
+    if (frame.m) sections = frame.m;
   },
-  asks(frame) { overlay.onDecision(frame, performance.now() / 1000); },
+  asks(frame) {
+    overlay.onDecision(frame, performance.now() / 1000);
+    for (const a of frame.asks) ui.say({ k: 'ask', a: a.from, b: a.to, text: a.text });
+  },
   decision(frame) {
-    state.condition = frame.condition;
+    ui.setMode(frame.condition);
+    ui.newTick();
     state.tick = frame.tick;
     state.asksPerTick = (frame.asks || []).length;
     state.section = frame.house ? frame.house.section : '';
     plate.pushTarget = state.section === 'drop' ? 1 : 0;   // slow push-in on the drop
     overlay.onDecision(frame, performance.now() / 1000);
+    for (const line of frame.chat || []) ui.say(line);
   },
 };
 
@@ -42,7 +54,7 @@ const audio = new AudioEngine({
   onChunk: (buf) => net.sendBinary(buf),
   onSeek: () => net.send({ type: 'control', action: 'seek' }),
 });
-const ui = initUI({ audio, net, overlay, state });
+ui = initUI({ audio, net, overlay, plate, state });
 setInterval(() => { if (audio.source) net.send(audio.clock()); }, 250);
 
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -56,6 +68,7 @@ function frame() {
 
   let music = audio.update(now);
   if (FAKE && !audio.playing) music = fake.fakeMusic(music, now);
+  music.sec = sections;
 
   // Linear interpolation between the last two physics frames.
   const alpha = Math.min(1, (now - curAt) / frameGap);
@@ -72,6 +85,7 @@ function frame() {
     v.action = c[10];
     v.pressure = lerp(p[11], c[11], alpha);
     v.nx = c[12]; v.ny = c[13]; v.nz = c[14];
+    v.r = lerp(p[15] || 0.07, c[15] || 0.07, alpha);
     sumH += v.H; sumE += v.E;
     byId.set(id, v);
     n++;
@@ -81,7 +95,7 @@ function frame() {
   plate.render(view, music, now);
   overlay.draw(view, byId, now);
 
-  // Performance fallback: lower the field resolution if we sit below 50 fps for 3 s.
+  // Performance fallback: lower the pigment resolution if we sit below 50 fps for 3 s.
   if (fps < 50 && now > 5) {
     slowSince ||= now;
     if (now - slowSince > 3) { plate.degrade(); slowSince = 0; }
@@ -90,11 +104,11 @@ function frame() {
   ui.stats([
     `${state.condition}  tick ${state.tick}  ${state.section}`,
     `mean H ${(sumH / (n || 1)).toFixed(2)}  mean E ${(sumE / (n || 1)).toFixed(2)}`,
-    `asks/tick ${state.asksPerTick}`,
-    `energy ${music.energy.toFixed(2)}  pcm chunks ${audio.chunks}`,
-    `${fps.toFixed(0)} fps  field x${plate.quality.toFixed(2)}${net.open ? '' : '  (no backend)'}`,
+    `build ${sections[0].toFixed(2)}  drop ${sections[1].toFixed(2)}  breakdown ${sections[2].toFixed(2)}`,
+    `asks/tick ${state.asksPerTick}  energy ${music.energy.toFixed(2)}  pcm chunks ${audio.chunks}`,
+    `${fps.toFixed(0)} fps  pigment x${plate.quality.toFixed(2)}${net.open ? '' : '  (no backend)'}`,
   ]);
-  window.__debug = { fps, n, chunks: audio.chunks, music, quality: plate.quality, audio };
+  window.__debug = { fps, n, chunks: audio.chunks, music, quality: plate.quality, audio, sections, state };
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

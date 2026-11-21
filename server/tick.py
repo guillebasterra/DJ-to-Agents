@@ -1,5 +1,6 @@
 """The tick loop body, every TICK_SECONDS (plan section 8)."""
 import asyncio
+import random
 import time
 
 from . import config as C, decide, negotiate, shove, wordofmouth
@@ -13,6 +14,42 @@ def _services(S):
     if "gemini" not in S.services:
         S.services["gemini"] = Gemini()
     return S.services["gemini"]
+
+
+def chat_lines(world, memo, house, heard, ask_answers):
+    """A few lines per tick for the chat panel: what the booth and one ring hear,
+    answers to asks, and notable moves. (Asks reach the panel as they are made.)"""
+    lines = []
+    for ans in ask_answers[:3]:
+        lines.append({"k": "answer", "a": ans["to"], "b": ans["from"],
+                      "text": "\u2713 yields" if ans["answer"] == "yes" else "\u2717 holds"})
+    # Notable moves: starts pushing hard, gives up a push, collapses.
+    prev = memo.get("last_moves", {})
+    now, moves = {}, []
+    for a in world.agents:
+        state = "exhausted" if a.exhausted else "hard" if a.action == "push" and a.pushiness >= 0.75 else a.action
+        now[a.id] = state
+        was = prev.get(a.id)
+        if was is None or was == state:
+            continue
+        if state == "exhausted":
+            moves.append((0, {"k": "move", "a": a.id, "text": "exhausted, carried to the back"}))
+        elif state == "hard":
+            moves.append((1, {"k": "move", "a": a.id, "text": "pushes hard"}))
+        elif was in ("push", "hard") and state in ("rest", "hold"):
+            moves.append((2, {"k": "move", "a": a.id, "text": "gives up the push"}))
+    memo["last_moves"] = now
+    random.Random(world.tick).shuffle(moves)
+    lines += [m for _, m in sorted(moves, key=lambda m: m[0])[:2]]
+    rings = [r for r, e in sorted(heard.items()) if e]
+    if rings:
+        r = rings[world.tick % len(rings)]      # a different ring each tick
+        e = heard[r]
+        lines.append({"k": "ring", "text": f"ring {r} hears: {e['section']} \u00b7 drop {e['drop_eta'].replace('_', ' ')} "
+                                           f"({e['drop_eta_probs'].get(e['drop_eta'], 0.0):.2f})"})
+    if house:
+        lines.append({"k": "booth", "text": f"BOOTH: {house['section']} ({house['section_probs'].get(house['section'], 0.0):.2f})"})
+    return lines
 
 
 async def run(S):
@@ -76,7 +113,7 @@ async def run(S):
                                 "p": e["drop_eta_probs"].get(e["drop_eta"], 0.0)}
                        for r, e in heard.items() if e},
              "asks": [negotiate.public(a) for a in new_asks if a["answer"] == "pending"],
-             "answers": ask_answers}
+             "answers": ask_answers, "chat": chat_lines(world, memo, house, heard, ask_answers)}
     await S.broadcast(frame)
 
     api = gemini.drain()

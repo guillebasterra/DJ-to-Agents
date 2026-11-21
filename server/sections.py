@@ -71,4 +71,5 @@ class HouseEar:
             if top in ("build", "breakdown"):
                 self.armed = True
         world.w = house["w"]
+        world.section_p = probs
         return house

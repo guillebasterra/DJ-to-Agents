@@ -1,14 +1,63 @@
-// Keys, the input picker and the stats corner.
+// Keys, the input picker, the mode banner, the legend, the chat panel and the stats corner.
 const trackUrls = import.meta.glob('../../tracks/*.{mp3,wav,m4a,flac,ogg}', { eager: true, query: '?url', import: 'default' });
 const runUrls = import.meta.glob('../../runs/*/session.wav', { eager: true, query: '?url', import: 'default' });
 
 const CONDITIONS = { 1: 'shove', 2: 'silent', 3: 'talk' };
+const MODES = {
+  shove: 'scripted crowd, no AI',
+  silent: 'each agent listens and decides with Gemini',
+  talk: 'agents decide and argue to get past each other',
+};
+const LEGEND = 'space play · 1 shove · 2 silent · 3 talk · C chat · L labels · D stats · I input · R reset';
+const LINES_PER_TICK = 6;
+const MAX_LINES = 160;
 
-export function initUI({ audio, net, overlay, state }) {
+export function initUI({ audio, net, overlay, plate, state }) {
   const picker = document.getElementById('picker');
   const stats = document.getElementById('stats');
-  const hint = document.getElementById('hint');
-  hint.textContent = 'I input   space play/pause   1/2/3 shove/silent/talk   L labels   D stats';
+  const legend = document.getElementById('legend');
+  const banner = document.getElementById('banner');
+  const chat = document.getElementById('chat');
+  legend.textContent = LEGEND;
+  const fitChat = () => { plate.setMargin(chat.hidden ? 0 : chat.offsetWidth); overlay.margin = plate.margin; };
+  fitChat();
+
+  // Mode banner: the current mode and one line about it, flashed when it changes.
+  let shown = null, flashTimer = 0;
+  const setMode = (mode) => {
+    if (!MODES[mode] || mode === shown) return;
+    const first = shown === null;
+    shown = state.condition = mode;
+    banner.innerHTML = `<b>${mode.toUpperCase()}</b><span>${MODES[mode]}</span>`;
+    if (first) return;
+    banner.classList.add('flash');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => banner.classList.remove('flash'), 900);
+  };
+  setMode(state.condition);
+
+  // Chat panel: newest at the bottom, a handful of lines per tick.
+  let budget = LINES_PER_TICK;
+  const who = (id) => `<span class="who" style="color:${plate.colors.get(id) || 'inherit'}">A${id}</span>`;
+  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const say = (line) => {
+    if (budget <= 0) return;
+    budget--;
+    const div = document.createElement('div');
+    if (line.k === 'ask' || line.k === 'answer') {
+      div.innerHTML = `${who(line.a)} → ${who(line.b)}: ${esc(line.text)}`;
+    } else if (line.k === 'move') {
+      div.innerHTML = `${who(line.a)} ${esc(line.text)}`;
+    } else {
+      div.className = 'quiet';
+      div.textContent = line.text;
+    }
+    const ids = [line.a, line.b].filter((x) => x !== undefined && x !== null);
+    div.onmouseenter = () => { overlay.highlight = ids; };
+    div.onmouseleave = () => { overlay.highlight = []; };
+    chat.append(div);
+    while (chat.children.length > MAX_LINES) chat.firstChild.remove();
+  };
 
   const choose = async (kind, arg, label) => {
     picker.hidden = true;
@@ -16,10 +65,9 @@ export function initUI({ audio, net, overlay, state }) {
       const src = await audio.setSource(kind, arg, label);
       net.send({ type: 'control', source: kind, label });
       if (src.el) await src.el.play();
-      hint.style.display = 'none';
+      legend.textContent = LEGEND;
     } catch (e) {
-      hint.style.display = 'block';
-      hint.textContent = `could not start ${label}: ${e.message}   (I to pick another input)`;
+      legend.textContent = `could not start ${label}: ${e.message}   (I to pick another input)`;
     }
   };
 
@@ -70,7 +118,8 @@ export function initUI({ audio, net, overlay, state }) {
     if (e.metaKey || e.ctrlKey) return;
     const k = e.key.toLowerCase();
     if (k === ' ') { e.preventDefault(); audio.source ? audio.toggle() : showPicker(); }
-    else if (CONDITIONS[k]) { state.condition = CONDITIONS[k]; net.send({ type: 'control', condition: CONDITIONS[k] }); }
+    else if (CONDITIONS[k]) { setMode(CONDITIONS[k]); net.send({ type: 'control', condition: CONDITIONS[k] }); }
+    else if (k === 'c') { chat.hidden = !chat.hidden; fitChat(); }
     else if (k === 'l') overlay.labels = !overlay.labels;
     else if (k === 'd') stats.style.display = stats.style.display === 'block' ? 'none' : 'block';
     else if (k === 'i') picker.hidden ? showPicker() : (picker.hidden = true);
@@ -87,7 +136,7 @@ export function initUI({ audio, net, overlay, state }) {
     const [path, url] = Object.entries(trackUrls)[+params.get('track')] || [];
     const start = () => {
       if (!net.open) return setTimeout(start, 100);
-      if (params.has('condition')) net.send({ type: 'control', condition: params.get('condition') });
+      if (params.has('condition')) { setMode(params.get('condition')); net.send({ type: 'control', condition: params.get('condition') }); }
       if (params.has('reset')) net.send({ type: 'control', action: 'reset' });
       if (url) {
         choose('file', url, path.split('/').slice(-1)[0]).then(() => {
@@ -99,6 +148,9 @@ export function initUI({ audio, net, overlay, state }) {
   }
 
   return {
+    setMode,
+    say,
+    newTick() { budget = LINES_PER_TICK; },
     stats(lines) { if (stats.style.display === 'block') stats.textContent = lines.join('\n'); },
   };
 }
