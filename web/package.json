@@ -1,0 +1,8 @@
+{
+  "name": "agent-crowd-web",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite", "build": "vite build" },
+  "devDependencies": { "vite": "^7.0.0" },
+  "dependencies": { "three": "^0.170.0" }
+}
