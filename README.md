@@ -15,6 +15,18 @@ cd web && npm install && npm run dev                     # http://localhost:5174
 `.env` needs `GEMINI_API_KEY`, `MODEL_DECISIONS`, `MODEL_HYDROGEN`, `MODEL_NEON`.
 Put MP3s in `tracks/` (gitignored). `web/?fake=1` runs the renderer with no backend.
 
+## Live input (Rekordbox)
+
+1. Install BlackHole 2ch. In Audio MIDI Setup create a Multi-Output Device (speakers + BlackHole 2ch) and set
+   Rekordbox's output to it (or plug in the mixer's USB audio).
+2. Open http://localhost:5174, press `I`, click "allow audio input to list devices...", then pick
+   "BlackHole 2ch" (or the mixer). Nothing else changes: the same analyser and capture worklet feed the backend.
+3. If the crowd doesn't react, check that the Multi-Output Device is Rekordbox's output and that macOS gave
+   the browser microphone permission. Every live session is recorded to `runs/<run>/session.wav` and can be
+   replayed from the picker under "Recorded sessions".
+
+Keys: `I` input picker, `space` play/pause, `1/2/3` shove/silent/talk, `L` labels, `D` stats, `R` reset crowd.
+
 ## API check (phase 0)
 
 `python -m server.api_check clip.wav` prints the raw responses.
@@ -99,6 +111,12 @@ not be measured (only 11 asks came from someone who had yielded to the blocker b
   long mean proximity had been rising without a break when the house ear called the drop. The contagion
   number is the correlation of an agent's H with its neighbors' mean H after removing each tick's crowd mean.
 - Neon runs as a plain single call (Interactions API, thinking high), not a Managed Agent.
+- Extended visuals: faces are carved in the vertex shader (eyes, brows, a mouth that curves with happiness)
+  and turn toward the agent's velocity; trails are 3 ghosts per agent at 0.9 s spacing, drawn from the first
+  2,500 dots; the chromatic fringe recolors and offsets 14-44% of edge dots by 2.5 px; the camera pushes in
+  0.07 while the house ear says "drop".
+- Live input: the picker lists audio inputs after a one-time permission prompt. Tested with Chrome's fake
+  capture device only; BlackHole / Rekordbox still needs a human at the machine (see "Live input").
 
 ## Credits
 

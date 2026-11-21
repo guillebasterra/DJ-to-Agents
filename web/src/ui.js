@@ -12,10 +12,15 @@ export function initUI({ audio, net, overlay, state }) {
 
   const choose = async (kind, arg, label) => {
     picker.hidden = true;
-    const src = await audio.setSource(kind, arg, label);
-    net.send({ type: 'control', source: kind, label });
-    if (src.el) src.el.play();
-    hint.style.display = 'none';
+    try {
+      const src = await audio.setSource(kind, arg, label);
+      net.send({ type: 'control', source: kind, label });
+      if (src.el) await src.el.play();
+      hint.style.display = 'none';
+    } catch (e) {
+      hint.style.display = 'block';
+      hint.textContent = `could not start ${label}: ${e.message}   (I to pick another input)`;
+    }
   };
 
   const showPicker = async () => {
@@ -39,6 +44,24 @@ export function initUI({ audio, net, overlay, state }) {
     for (const [path, url] of Object.entries(runUrls)) {
       const run = path.split('/').slice(-2)[0];
       item(run, () => choose('file', url, run));
+    }
+    // Live inputs (BlackHole 2ch, the mixer's USB...). Labels only appear once
+    // the browser has microphone permission, so ask for it on demand.
+    section('Live input');
+    let inputs = [];
+    try {
+      inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+    } catch (e) { /* no media devices in this browser */ }
+    if (inputs.some((d) => d.label)) {
+      for (const d of inputs) item(d.label, () => choose('live', d.deviceId, d.label));
+    } else {
+      item('allow audio input to list devices...', async () => {
+        try {
+          const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+          s.getTracks().forEach((t) => t.stop());
+        } catch (e) { /* denied: the list stays empty */ }
+        showPicker();
+      });
     }
     picker.hidden = false;
   };

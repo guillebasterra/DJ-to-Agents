@@ -25,7 +25,7 @@ export const sources = {
   // the DJ setup already feeds the speakers.
   async live(ctx, deviceId, label) {
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { deviceId: deviceId ? { exact: deviceId } : undefined,
+      audio: { deviceId: deviceId && deviceId !== 'default' ? { exact: deviceId } : undefined,
         echoCancellation: false, noiseSuppression: false, autoGainControl: false },
     });
     const start = ctx.currentTime;
