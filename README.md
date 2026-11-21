@@ -116,7 +116,7 @@ not be measured (only 11 asks came from someone who had yielded to the blocker b
 - Trails: `max(current * 0.5, previous * 0.985)` per 1/60 s, with the previous frame scaled 0.16% toward
   the center of the screen (the vanishing point), so smears drift away from the glass.
 - Happiness: H follows u / 0.75 instead of u / 3 (u / 1.5 still gave a 5-95% range of only 0.06-0.39; with
-  0.75 the headless run spans 0.14-0.83). Logged H and u are the raw values. Agents see their H in the
+  0.75 the 360 s headless run spans 0.12-0.77). Logged H and u are the raw values. Agents see their H in the
   prompt, so decisions can shift with this change.
 - Hot zone: the band x 0.3-0.7, y 0.35-0.65 on the glass. Proximity, rings, push direction, the blocked
   cone and the tide all use the nearest point of the band. D_MAX is 1.101.
@@ -134,7 +134,7 @@ not be measured (only 11 asks came from someone who had yielded to the blocker b
 - Plate: at most 3 ask threads at once, as a bowed line with a bubble by the asker (sentence cut at 54
   characters), fading after 3 s. With the chat open the plate is centered in the space left of it.
 - Headless check (`python -m server.headless`, shove, synthetic loud / quiet): mean proximity 0.66 loud vs
-  0.45 quiet (gap 0.21); diehards 0.66, between 0.58, dancers 0.48.
+  0.44 quiet (gap 0.22) over 360 s; diehards 0.66, between 0.56, dancers 0.49.
 
 ### Visual + physics rework (replaces the renderer and collision notes further down)
 
