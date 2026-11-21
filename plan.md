@@ -1,4 +1,4 @@
-# plan.md — Agent Crowd (narrowed)
+# plan.md — Agent Crowd: 3D aquarium build
 
 Build plan for a coding agent. Read this whole file before writing code. Build in the phase order at the bottom; each phase has a definition of done. The repo is already scaffolded (stubs, venv, Vite, .env). Fill in the stubs; files listed in the layout but not used in this plan can stay empty or be deleted.
 
@@ -6,7 +6,7 @@ Build plan for a coding agent. Read this whole file before writing code. Build i
 
 ## 0. What we're building
 
-100 Gemini-driven agents share a virtual dancefloor and compete for the spot closest to the DJ while a live DJ set plays (Rekordbox → audio interface → browser). There are no track labels: everything about the music is deduced from the audio itself by the models. The front is worth most during the drop but drains energy; open space restores it. Agents decide what to do every ~3 s from what they hear (raw audio clips, filtered by their distance from the speakers), their own state and their neighbors. Mood is contagious: an agent's happiness drifts toward its neighbors'. Blocked agents argue in natural language to get past. The screen renders the crowd as pulsing pigment blobs on a TLC (thin-layer chromatography) plate: colored by happiness, pulsing harder as the music builds to the drop, leaving short trails. Every run is logged and compared across three conditions (scripted shoving, silent agents, talking agents).
+100 Gemini-driven agents float in a 3D aquarium in front of the DJ and compete for the hot spot at the center of the front glass while a live DJ set plays (Rekordbox → audio interface → browser). There are no track labels: everything about the music is deduced from the audio itself by the models. The front is worth most during the drop but drains energy; open space restores it. Agents decide what to do every ~3 s from what they hear (raw audio clips, filtered by their distance from the speakers), their own state and their neighbors. Mood is contagious: an agent's happiness drifts toward its neighbors'. Blocked agents argue in natural language to get past. The screen is the DJ's view into the aquarium: each agent is a stippled point-cloud sphere, colored by happiness, pulsing harder as the music builds to the drop, swelling as it fights its way toward the glass. Every run is logged and compared across three conditions (scripted shoving, silent agents, talking agents).
 
 Hackathon: Gemini 4 NYC (Cerebral Valley + Google DeepMind). Submissions due 17:00.
 
@@ -58,18 +58,22 @@ runs/    (gitignored) one folder per run, including the recorded session audio
 - Model names come from `.env`: `MODEL_DECISIONS`, `MODEL_HYDROGEN`, `MODEL_NEON`.
 - Audio path: the browser is the only thing that touches the input. It streams 16 kHz mono PCM to the backend; the backend never reads track files directly.
 - `sections.py` is repurposed as the **house ear** (section 6). It does not load labels.
+- **Ports:** backend on 8001, Vite on 5174 (another build of this project runs on the default ports).
+- Three.js is allowed for the renderer (credit it in README).
 
 ---
 
 ## 3. Coordinates and constants (all in `config.py`)
 
-- **Floor:** unit square, x, y ∈ [0, 1]. **DJ at (0.5, 0.0)** in physics; the renderer flips y so the DJ shows at the top.
-- **N_AGENTS = 100**, AGENT_RADIUS = 0.028, PHYSICS_HZ = 30, TICK_SECONDS = 3.0 (fallback 4.0).
-- **Rings** by distance to the DJ; edges at 0.2, 0.4, 0.6, 0.8 → rings 1 (front) to 5 (back).
-- **Max speed:** 0.05 units/s × (0.4 + 0.6 × E).
+- **Volume (the aquarium):** x ∈ [0, 1] left–right, y ∈ [0, 1] down–up, z ∈ [0, 1] distance from the DJ (z = 0 is the front glass). **No gravity:** agents float and can pass over, under and around each other.
+- **Hot spot (front center):** H0 = (0.5, 0.5, 0.0). The DJ / camera sits in front of the glass at (0.5, 0.5, −0.35), looking down +z.
+- **N_AGENTS = 100**, AGENT_RADIUS = 0.06, PHYSICS_HZ = 30, TICK_SECONDS = 3.0 (fallback 4.0).
+- **Distance** d = |p − H0|; max ≈ 1.225.
+- **Rings** by d; edges at 0.25, 0.45, 0.65, 0.85 → rings 1 (front) to 5 (back).
+- **Max speed:** 0.06 units/s × (0.4 + 0.6 × E).
 - **Collision iterations:** 4 per frame.
-- **Density ρ** = neighbors within 2.5 × radius, capped at 8, ÷ 8.
-- **Proximity v** = 1 − dist_to_DJ / 1.118.
+- **Density ρ** = neighbors within 2.5 × radius, capped at 12, ÷ 12.
+- **Proximity v** = 1 − d / 1.225.
 - **Energy constants** (per second; tune only these): a = 0.022 (front crush), b = 0.010 (push), d = 0.008 (dance), c = 0.033 (rest recovery).
 - **Exhaustion:** at E ≤ 0 the agent is forced into `retreat` until E ≥ 0.3.
 - **Happiness smoothing:** EMA with τ = 10 s.
@@ -86,12 +90,12 @@ runs/    (gitignored) one folder per run, including the recorded session audio
 @dataclass
 class Agent:
     id: int
-    x: float; y: float; vx: float; vy: float
+    x: float; y: float; z: float; vx: float; vy: float; vz: float
     E: float = 0.8                 # energy (fatigue reserve)
     k: float                       # trait: keenness for the front (fixed)
     s: float                       # trait: need for space (fixed)
     archetype: str                 # "diehard" | "dancer" | "between"
-    lane: int                      # starting lane 0..9 (origin line, used in the regression)
+    lane: int                      # starting column 0..9 on the back wall (used in the regression)
     action: str = "hold"           # hold | push | yield | rest | dance | retreat
     pushiness: float = 0.3
     target: tuple[float, float]
@@ -108,24 +112,24 @@ class Agent:
 - between (40%): k = 0.5, s = 0.5
 - Add uniform noise ±0.1 to each, clipped to [0, 1].
 
-**Start positions:** 10 lanes across the back (y ∈ [0.85, 0.97]), 10 agents per lane, with jitter. This is the TLC origin line.
+**Start positions:** on the back wall (z ∈ [0.85, 0.97]), 10 columns across x, 10 agents per column spread over y, with jitter.
 
 **Yield counters:** `yielded_to[a][b]` (how many times a yielded to b). No promises or ledger.
 
 ---
 
-## 5. Physics (`physics.py`, 30 Hz)
+## 5. Physics (`physics.py`, 30 Hz, 3D)
 
 Each frame (dt = 1/30):
 
 1. **Target by action** (recompute when the action changes or every 0.5 s):
    - `hold` / `dance`: current position.
-   - `push`: current position + 0.08 × unit vector toward the DJ.
-   - `yield`: sidestep 0.06 perpendicular to the DJ direction, toward the less dense side.
-   - `rest`: center of the lowest-density cell within radius 0.25 (10×10 density grid).
-   - `retreat`: (x, 0.95).
-2. **Integrate:** velocity steers toward the target, clamped to max speed; position += velocity × dt.
-3. **Collide:** brute force over all pairs; separate along the contact normal, split by inverse mass where **mass = 0.2 + pushiness × E**. Accumulate overlap depth into `pressure`. Clamp to the walls; the DJ booth (y < 0.03) is a wall. 4 iterations.
+   - `push`: current position + 0.08 × unit vector toward H0.
+   - `yield`: sidestep 0.08 perpendicular to the direction to H0; sample 6 perpendicular directions and pick the least dense.
+   - `rest`: center of the lowest-density cell within radius 0.3 (6×6×6 density grid).
+   - `retreat`: (x, y, 0.95).
+2. **Integrate:** velocity steers toward the target, clamped to max speed; position += velocity × dt. Light damping so floating agents settle instead of drifting forever.
+3. **Collide:** brute force over all pairs, spheres in 3D; separate along the contact normal, split by inverse mass where **mass = 0.2 + pushiness × E**. Accumulate overlap depth into `pressure` and keep the **contact normal with the largest overlap** (the renderer squashes along it). Clamp to the box walls; the front glass (z < 0) is a wall. 4 iterations.
 4. **Derive** ρ and v.
 5. **Energy:**
    - dE/dt = −a·v·ρ − b·[push] − d·[dance] + c·(1 − v)·(1 − ρ)·[rest or hold with ρ < 0.2]
@@ -256,7 +260,7 @@ res = client.decisions.create(          # async client if available; else run in
 **Instructions template for `a{id}_action`** (under ~90 tokens):
 
 ```
-You are A{id} on a dancefloor, ring {r} of 5 from the DJ (1 = front).
+You are A{id} in a packed crowd, ring {r} of 5 from the DJ (1 = front).
 Traits: keen {k:.1f}, space {s:.1f}. Now: energy {E:.2f}, proximity {v:.2f}, crowding {rho:.2f}, happiness {H:.2f}.
 Neighbors: {A7 pushing, A30 resting}. {Word from ring 2: drop next_8_bars (0.70).}
 Given what you hear, what do you do now?
@@ -273,7 +277,7 @@ Given what you hear, what do you do now?
 ### 8.3 Arguing (`negotiate.py`, talk condition only)
 
 **Contest detection**
-- A pushing agent is **blocked** if a neighbor sits within 2.2 × radius inside its forward cone (±35° toward the DJ) and that neighbor isn't yielding.
+- A pushing agent is **blocked** if a neighbor sits within 2.2 × radius inside its 3D forward cone (±35° toward H0) and that neighbor isn't yielding.
 - Score = pushiness × (v_blocker − v_asker + 0.1). Take the top MAX_ASKS_PER_TICK; the rest just collide.
 
 **Hydrogen ask.** The prompt gives the asker's traits, E, H, ring and what it heard; the blocker's public state (position, apparent energy low/med/high, current action); and how many times each has yielded to the other.
@@ -304,9 +308,9 @@ The system prompt says the agent wants to get closer to the DJ. **Do not instruc
 
 **Server → client, physics frame (30 Hz):**
 ```json
-{"type":"physics","t":84.03,"agents":[[12,0.48,0.09,0.01,-0.02,0.62,0.81,0.55,"push",0.12]]}
+{"type":"physics","t":84.03,"agents":[[12,0.48,0.52,0.09,0.01,0.0,-0.02,0.62,0.81,0.55,"push",0.12,0.0,0.7,0.7]]}
 ```
-Each agent is `[id, x, y, vx, vy, E, rho, H, action, pressure]`.
+Each agent is `[id, x, y, z, vx, vy, vz, E, rho, H, action, pressure, nx, ny, nz]` (n = main contact normal).
 
 **Server → client, decision frame (each tick):**
 ```json
@@ -329,54 +333,53 @@ Plus **binary messages**: raw Int16 PCM, 16 kHz mono, 250 ms per message.
 
 ---
 
-## 10. Renderer: pulsing blobs on a TLC plate (`plate.js`, shaders, `overlay.js`)
+## 10. Renderer: stippled spheres in an aquarium (`plate.js`, shaders, `overlay.js`)
 
 **Reference images** (in `docs/ref/`):
-- `packing.gif` = **motion and packing only**: bodies squash into rounded polygons where they touch, with a thin gap, and never merge. Ignore its black background, outlines and particle texture.
-- `tlc.jpg` = **the look**: paper, spots, halos, streaks, overlaps, typed labels, lane letters, origin line.
+- `aquarium.gif` = **the look**: spheres made of crisp dithered dots on a near-black background, a limited red / blue / off-white palette with dots of different colors mixed rather than blended, shading by dot density, soft speckled edges, nearer spheres covering farther ones.
+- `packing.gif` = **contact behavior only**: bodies flatten where they press against each other and never merge. Ignore its look.
+- `tlc.jpg` is not used in this build.
 In phase A and phase H, screenshot `web/?fake=1` after each change and compare against both.
 
-**Look:** soft pigment blobs on warm pinkish paper (#f6ebe6) with grain, short streaks trailing away from the DJ, overlapping dyes darken. **DJ at the top.**
+**Camera:** the DJ's view. Perspective camera at (0.5, 0.5, −0.35) looking at (0.5, 0.5, 0.5), FOV ~60°. The hot spot is the center of the screen, nearest the viewer: agents swell as they get closer. Slow camera drift (±0.03) to reveal depth.
 
-**Happiness → color** (`palette.js`, interpolate in OKLab). Because H spreads between neighbors, color visibly spreads through the crowd.
+**Background:** #1a1214 with faint grain.
 
-| H | Color |
+**Spheres (point clouds):**
+- Precompute 4 unit-sphere point sets of ~3,000 points each, biased toward the surface. Each agent instances one; per-agent data (position, pulsed radius, squash normal + amount, velocity, E, H) comes from a data texture or instanced attributes.
+- **Stipple shading:** per point, lambert = dot(normal, light) with the light from upper-left-front. Keep the point if hash(point id) < f(lambert), so lit sides are dense and shadow sides sparse (dithering by density, not by brightness). Add a speckled rim.
+- **Dots:** 1–1.5 px squares, DPR-aware, no smoothing. Depth test on.
+- **Happiness → color, by mixing dots** (each point picks one of the three colors with probabilities set by H, never a blended color):
+
+| H | Dot mix |
 | --- | --- |
-| 0.00 | #b9b3c9 pale grey-violet |
-| 0.30 | #6f6fb8 blue-violet |
-| 0.55 | #8a3fa0 purple |
-| 0.75 | #d12f7a magenta |
-| 1.00 | #d9481c red-orange |
+| 0.0 | mostly blue #1e6fc8, sparse |
+| 0.4 | blue + red #e0322e |
+| 0.7 | mostly red, some off-white |
+| 1.0 | off-white #d8d4d6 core, red and blue dots at the edges |
 
-**Energy E → pigment density** (core saturation).
+- **Energy E → point count** (tired agents are sparse and ghostly).
+- **Pulse:** radius = r × (1 + 0.15 × music_energy × E + 0.25 × kick_envelope × E), kick_envelope decaying over 120 ms. Pulsing grows into the drop.
+- **Squash:** scale down along the main contact normal by 1 / (1 + 2 × pressure), volume-preserving, so packed agents flatten against each other.
+- **Stretch:** mild elongation along velocity.
+- **Depth fog:** far agents fade toward the background, so the back of the aquarium recedes.
 
-**Pulse (size):** radius = r × (1 + 0.15 × music_energy × E + 0.25 × kick_envelope × E), where kick_envelope decays over 120 ms. Pulsing grows as the music builds and peaks at the drop; tired agents pulse less.
+**Overlay** (Canvas2D, DPR-aware, positions projected from 3D):
+- agent ids (`A12`, 9 px mono, 55% opacity) beside each sphere;
+- ask threads: thin line between asker and blocker with the ask text in 10 px mono, fading after 3 s; yes → grey-green, no → short red tick.
 
-### Pipeline (WebGL2, `EXT_color_buffer_float`; fall back to RGBA8)
-
-1. **Trail buffer A** (RGBA16F, ping-pong). Store absorbance: a = −ln(max(c, 0.04)) per channel.
-2. **Decay pass** each frame: A ← A × 0.985, plus advection of 0.3 px/frame away from the DJ (TLC streaks).
-3. **Splat pass:** one instanced quad per agent, an anisotropic Gaussian: long axis along velocity (length = r × (1 + 6 × speed)), short axis = r / (1 + 2 × pressure); amount = 0.06 × (0.3 + 0.7E), pigment = palette(H); additive into A.
-4. **Body pass** (current positions, not accumulated): soft bodies that **squash against each other but never merge** (see the packed-blobs reference image). Per pixel, find the nearest and second-nearest agents (weighted by r_pulse, a power-diagram style distance) from the agent data texture. The pixel belongs to the nearest agent if it's inside its pulsed radius; where two bodies meet, leave a thin paper-colored gap (~1.5 px) along the equal-distance boundary. Edges are soft (smoothstep), so packed agents flatten into rounded polygons where they touch and stay round where they're free.
-5. **Composite:** out = paper × exp(−(A + body)); paper = #f6ebe6 with animated grain (±3.5%) and a slight vignette.
-6. **Overlay** (Canvas2D, DPR-aware):
-   - agent ids (`A12`, 9 px mono, 55% opacity);
-   - origin line at the bottom with lane letters (B C E G H L M P S Ś style, from `init`), a faint pencil solvent-front line at the top labeled "DJ";
-   - ask threads: thin graphite line between asker and blocker with the ask text in 10 px mono, fading after 3 s; yes → green-grey, no → short red tick.
-7. **UI (`ui.js`):** space = play/pause, 1/2/3 = condition, L = labels, D = tiny stats corner (mean H, mean E, asks/tick), I = input picker (file list; live devices once phase L is done). The picker hides itself after selection so the plate fills the screen.
+**UI (`ui.js`):** space = play/pause, 1/2/3 = condition, L = labels, D = tiny stats corner (mean H, mean E, asks/tick), I = input picker (file list; live devices once phase L is done). The picker hides itself after selection.
 
 **Interpolation:** render at 60 fps, linear interpolation between the last two physics frames.
 
-### Extended visual detail (phase H, after the core runs)
-- **Halos:** in the splat pass, a second Gaussian per agent: σ = 1.1r, amount = 0.015, pigment = palette(H) hue-shifted −25° toward blue. Core σ becomes 0.35r.
-- **Dance hop:** agents with action `dance` offset y by 0.25r × sin(kick phase).
-- **Paper fibers:** paper = #f6ebe6 × (1 − 0.06 × fbm fibers): static procedural noise, two octaves, stretched vertically.
-- **Watercolor edges:** a very faint rim darkening where |∇A| is high.
-- Also: decay A ← A × 0.992 with a 5-tap blur at radius 1 px, for softer, longer streaks.
-- Broken-promise markers don't apply (no promises in this plan).
-- Credit ink edge ideas from ink-on-click (MIT) in README if used.
+**Performance:** 100 × 3,000 = 300k points. If below 60 fps, drop to 1,500 per sphere.
 
-**Credit in README.md:** splat-shader approach after Pavel Dobryakov's WebGL Fluid Simulation (MIT); any grain/paper snippet used.
+### Extended visual detail (phase H, after the core runs)
+- **Faces:** a darker dot pattern (two eyes, a mouth) carved out of the density on the camera-facing side, turning toward the agent's motion. Generic faces only.
+- **Dance hop:** agents with action `dance` bob along y on the kick.
+- **Trails:** a few previous positions as faint, sparse ghost dots.
+- **Chromatic fringe:** red and blue dots offset slightly at sphere edges, as in the reference.
+- **Camera drift tuning** and a slow push-in on the drop.
 
 ---
 
@@ -427,13 +430,13 @@ Add to `analyze.py`:
 | Time | Phase | Definition of done |
 | --- | --- | --- |
 | 11:30–12:00 | **0. Skeleton + API check** | Repo public. FastAPI WebSocket echo works (JSON and binary). Raw responses printed for one Decisions call **with an audio block** and one Hydrogen structured call **with audio input**. If Decisions rejects audio, switch to the Hydrogen perception path (section 7.1) now. Latencies noted in README. |
-| 12:00–13:15 | **A. Renderer + audio capture** (`?fake=1`) | 100 fake agents render as pulsing blobs (squash, no merge) with trails, happiness colors, energy density, paper + grain, overlay ids, kick pulse. MP3 playback through the shared audio graph; the capture worklet produces 16 kHz PCM chunks only while playing. 60 fps. |
-| 12:00–13:15 | **B. Physics + shove** | `physics.py` + `shove.py` run headless. Until the house ear exists, drive w with a temporary DSP proxy (w = 0.5 + 2.5 × energy_5s) so you can see compression on loud sections and dispersal on quiet ones. Energy drains and recovers; exhaustion triggers retreat; happiness spreads. Frames streamed. |
+| 12:00–13:15 | **A. Renderer + audio capture** (`?fake=1`) | 100 fake agents (3D random walk) render as stippled spheres from the DJ's view: dot-mixed happiness colors, energy density, pulse, squash, depth fog, overlay ids, kick pulse. MP3 playback through the shared audio graph; the capture worklet produces 16 kHz PCM chunks only while playing. 60 fps. |
+| 12:00–13:15 | **B. Physics + shove** | `physics.py` + `shove.py` run headless. Until the house ear exists, drive w with a temporary DSP proxy (w = 0.5 + 2.5 × energy_5s) so you can see compression toward the hot spot on loud sections and dispersal on quiet ones, with agents passing over and under each other. Energy drains and recovers; exhaustion triggers retreat; happiness spreads. Frames streamed. |
 | 13:15–13:45 | **C. Wire A + B** | Browser plays the MP3 and streams clock + PCM; pause and seek behave; backend buffers and records `session.wav`; the shove crowd renders and reacts to playback. **First demoable version.** Commit + tag `v0-shove`. |
 | 13:45–14:45 | **D. House ear + Decisions loop** | House ear sets w (remove the DSP proxy). Ring clips + filters, parallel calls, parsing, word of mouth, logging. Silent condition runs a whole MP3 without errors; p95 tick latency < TICK_SECONDS. |
 | 14:45–15:30 | **E. Arguing** | Contests, Hydrogen asks, answers next tick, yield counters, ask threads on screen. Talk condition runs a whole MP3. |
 | 15:30–15:55 | **F. Runs + core analysis** | 3 runs (shove, silent, talk) on the same MP3 and seed. Core `analyze.py` and `neon_report.py` produce outputs. Pick 3 headline numbers. |
-| 15:55–16:15 | **H. Extended visuals + full analysis** | Halos, dance hop, paper fibers, watercolor edges (section 10). Pacing, who-wins + OLS, ring-vs-house agreement, extra tables, `highlights.py` (section 12). Re-run `neon_report.py` on the full summary. |
+| 15:55–16:15 | **H. Extended visuals + full analysis** | Faces, dance hop, trails, chromatic fringe, camera drift (section 10). Pacing, who-wins + OLS, ring-vs-house agreement, extra tables, `highlights.py` (section 12). Re-run `neon_report.py` on the full summary. |
 | 16:15–16:30 | **L. Switch to live** | Swap the source to `getUserMedia`, add the device picker. Human setup: install BlackHole 2ch; in Audio MIDI Setup create a Multi-Output Device (speakers + BlackHole) and set Rekordbox's output to it (or use the mixer's USB). Done when the crowd reacts to Rekordbox with nothing else changed. |
 | 16:30–16:45 | **G. Polish + video** | Pulse and colors tuned. Record the 1-minute demo video (live Rekordbox if phase L worked, otherwise the MP3). |
 | 16:45–17:00 | **Submit** | Repo public, README complete (what it is, how to run incl. BlackHole setup, credits, what was built today, what broke), video link works, teammates on the submission. |
@@ -441,8 +444,8 @@ Add to `analyze.py`:
 If earlier phases finish early, start phase H sooner; the extended visuals can run in parallel with D or E.
 
 **Cut order if behind:**
-1. phase H items, in this order: OLS regression, watercolor edges, highlights.py, paper fibers, dance hop, halos, pacing plot,
-2. trails (keep bodies only),
+1. phase H items, in this order: OLS regression, chromatic fringe, highlights.py, trails, dance hop, faces, pacing plot,
+2. points per sphere (down to 1,500),
 3. word of mouth,
 4. `neon_report.py` as a Managed Agent → plain single call (never drop Neon entirely: it's the second Gemini 4 model).
 
@@ -460,7 +463,8 @@ Phase L is small if audio.js keeps the source swappable; if time is short, demo 
 - **Live runs aren't repeatable:** compare conditions on the same MP3 (or a recorded `session.wav`).
 - **Rate limits:** TICK_SECONDS → 4, MAX_ASKS_PER_TICK → 4; trim instruction text.
 - **Hydrogen is slow:** asks are async; a late ask is fine. If p95 > 6 s, cap at 4 asks.
-- **WebGL float buffers unsupported:** RGBA8 with stronger decay.
+- **Too many points for 60 fps:** fewer points per sphere; skip agents fully hidden behind nearer ones.
+- **3D packing hides the fight:** keep the camera drift, fog the back, and keep ask threads on top of everything.
 - **Physics tuning eats time:** only touch a, b, c, d, κ and max speed.
 - **Never block the render loop on the network.** Keep interpolating from the last frames.
 
@@ -469,7 +473,7 @@ Phase L is small if audio.js keeps the source swappable; if time is short, demo 
 ## 15. Demo script (3 minutes live)
 
 1. **(20 s)** "A house crowd is the purest human collective. What happens when the crowd is 100 copies of Gemini?"
-2. **(60 s)** Live from Rekordbox (or the MP3), talk condition. Say up front: no track labels, the agents only hear the audio. Point out: blobs migrating toward the DJ during the build; pulsing intensifying into the drop; color spreading through the crowd; a few ask threads with their text.
+2. **(60 s)** Live from Rekordbox (or the MP3), talk condition. Say up front: no track labels, the agents only hear the audio. Point out: spheres swelling toward the glass during the build; pulsing intensifying into the drop; color spreading through the crowd; spheres squashing and slipping past each other; a few ask threads with their text.
 3. **(30 s)** Flip to shove: the same crowd with no minds.
 4. **(50 s)** Three headline numbers from `summary.json` (e.g. drop lead time, ask acceptance / reciprocity, welfare vs. shove) plus one quoted ask.
 5. **(20 s)** Where it broke and what changed.
