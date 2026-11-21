@@ -44,6 +44,9 @@ const audio = new AudioEngine({
 const ui = initUI({ audio, net, overlay, state });
 setInterval(() => { if (audio.source) net.send(audio.clock()); }, 250);
 
+// Real happiness mostly lives in 0..0.5 (u is divided by 3), so stretch it
+// over the whole blue -> red -> white range for display only.
+const showH = (h) => 1 - Math.exp(-4 * h);
 const lerp = (a, b, t) => a + (b - a) * t;
 let fps = 60, last = performance.now() / 1000, slowSince = 0;
 
@@ -66,12 +69,14 @@ function frame() {
     v.id = id;
     v.x = lerp(p[1], c[1], alpha); v.y = lerp(p[2], c[2], alpha); v.z = lerp(p[3], c[3], alpha);
     v.vx = c[4]; v.vy = c[5]; v.vz = c[6];
-    v.E = lerp(p[7], c[7], alpha); v.H = lerp(p[9], c[9], alpha);
+    v.E = lerp(p[7], c[7], alpha);
+    v.rawH = lerp(p[9], c[9], alpha);
+    v.H = FAKE ? v.rawH : showH(v.rawH);
     v.action = c[10];
     v.pressure = lerp(p[11], c[11], alpha);
     v.nx = c[12]; v.ny = c[13]; v.nz = c[14];
     v.flags = FLAG[c[10]] || 0;
-    sumH += v.H; sumE += v.E;
+    sumH += v.rawH; sumE += v.E;
     byId.set(id, v);
     n++;
   }

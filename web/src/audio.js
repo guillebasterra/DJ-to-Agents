@@ -141,7 +141,12 @@ export class AudioEngine {
       max[k] = Math.max(max[k] * 0.9997, raw[k]);
       norm[k] = raw[k] / max[k];
     }
-    for (const k of ['sub', 'bass', 'mid', 'high', 'rms']) f[k] += (norm[k] - f[k]) * 0.35;
+    // Peak-hold envelopes (0.4 s release): a level per band, not the waveform,
+    // so a steady kick reads as steadily loud between hits.
+    const dt = Math.min(0.1, Math.max(0.001, now - (this.lastUpdate || now)));
+    this.lastUpdate = now;
+    const release = Math.exp(-dt / 0.4);
+    for (const k of ['sub', 'bass', 'mid', 'high', 'rms']) f[k] = Math.max(norm[k], f[k] * release);
 
     // Kick: onset on the low band (flux over threshold, 120 ms refractory).
     const flux = Math.max(0, norm.low - this.lowHist[0]);

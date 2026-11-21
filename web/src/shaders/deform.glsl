@@ -2,7 +2,7 @@
 // Squash along the main contact normal by 1 / (1 + 2 * pressure) and stretch
 // mildly along velocity; both keep the volume.
 vec3 deform(vec3 p, vec4 squash, vec3 vel) {
-  float pr = min(squash.w, 0.6);
+  float pr = min(squash.w, 0.3);
   float nl = length(squash.xyz);
   if (pr > 0.001 && nl > 0.5) {
     vec3 n = squash.xyz / nl;

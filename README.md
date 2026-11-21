@@ -8,7 +8,7 @@ See `plan.md` for the full design.
 
 ```
 uv venv --python 3.11 .venv && uv pip install -p .venv/bin/python -r requirements.txt
-.venv/bin/uvicorn server.main:app --port 8001          # backend
+.venv/bin/python -m server.main --seed 1 --condition talk   # backend, port 8001
 cd web && npm install && npm run dev                     # http://localhost:5174
 ```
 
@@ -44,6 +44,15 @@ Decisions accepts raw audio directly, so the Hydrogen perception fallback is not
   flatten a little. `Agent.target` is a 3D point.
 - Physics, energy and happiness only advance while audio is playing; frames keep streaming while paused.
 - Phase B check: `python -m server.headless` runs physics + shove on a synthetic loud / quiet schedule.
+- Runs: a new run folder starts when the condition, the source, or the crowd (R = reset) changes. Switching
+  condition keeps the crowd where it is, so the demo can flip minds on and off mid-track. Seed and starting
+  condition come from the CLI: `python -m server.main --seed 1 --condition talk`.
+- `GET /status` on the backend reports playback, tick and run state (for debugging).
+- Ring 3's low-pass is 6 kHz, because the plan's 8 kHz is the Nyquist frequency of the 16 kHz stream.
+- Band features are peak-hold envelopes (0.4 s release) of linear band amplitude, so `energy` reads as a
+  loudness level instead of dipping to zero between kicks.
+- Display only: happiness is stretched for color (`1 - exp(-4H)`) because the plan's u / 3 keeps real H mostly
+  below 0.5. Logs and analysis use the raw H.
 
 ## Credits
 

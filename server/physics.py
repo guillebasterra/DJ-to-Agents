@@ -107,7 +107,7 @@ class Physics:
                 # Pressure: how hard neighbors press in, with a soft margin so agents
                 # resting in contact still flatten a little against each other.
                 soft = np.where(eye, 0.0, np.maximum(0.0, PRESS_MARGIN * 2 * R - dd))
-                pressure = 1.5 * soft.sum(1) / (2 * R)
+                pressure = 0.35 * soft.sum(1) / (2 * R)
                 j = soft.argmax(1)
                 hit = soft.max(1) > 0
                 normal[hit] = -(diff / dd[..., None])[np.arange(n), j][hit]
