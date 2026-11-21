@@ -13,7 +13,7 @@ const state = { condition: 'talk', tick: 0, asksPerTick: 0, section: '' };
 
 // Last two physics frames, keyed by agent id, for interpolation.
 let prev = new Map(), cur = new Map(), curAt = 0, frameGap = 1 / 30;
-let sections = [0, 0, 0];   // the house ear's smoothed p(build), p(drop), p(breakdown)
+let sections = [0, 0, 0, 0];   // smoothed p(build), p(drop), p(breakdown) from the house ear, and crowd intensity
 const view = [];            // interpolated agents, reused every frame
 const byId = new Map();
 let ui = null;
@@ -85,7 +85,7 @@ function frame() {
     v.action = c[10];
     v.pressure = lerp(p[11], c[11], alpha);
     v.nx = c[12]; v.ny = c[13]; v.nz = c[14];
-    v.r = lerp(p[15] || 0.07, c[15] || 0.07, alpha);
+    v.r = lerp(p[15] || 0.05, c[15] || 0.05, alpha);
     sumH += v.H; sumE += v.E;
     byId.set(id, v);
     n++;
@@ -104,7 +104,7 @@ function frame() {
   ui.stats([
     `${state.condition}  tick ${state.tick}  ${state.section}`,
     `mean H ${(sumH / (n || 1)).toFixed(2)}  mean E ${(sumE / (n || 1)).toFixed(2)}`,
-    `build ${sections[0].toFixed(2)}  drop ${sections[1].toFixed(2)}  breakdown ${sections[2].toFixed(2)}`,
+    `intensity ${(sections[3] || 0).toFixed(2)}  build ${sections[0].toFixed(2)}  drop ${sections[1].toFixed(2)}  breakdown ${sections[2].toFixed(2)}`,
     `asks/tick ${state.asksPerTick}  energy ${music.energy.toFixed(2)}  pcm chunks ${audio.chunks}`,
     `${fps.toFixed(0)} fps  pigment x${plate.quality.toFixed(2)}${net.open ? '' : '  (no backend)'}`,
   ]);

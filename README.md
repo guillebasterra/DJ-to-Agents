@@ -19,7 +19,8 @@ asking whom, the answers, and what each ring and the booth think they hear.
 
 ![breakdown, build and drop](docs/pass2_moments.png)
 
-Top to bottom: a breakdown (170 s), the build (182 s) and the drop (188 s) of the same talk run.
+Top to bottom: a breakdown (170 s), the build (182 s) and the drop (188 s) of the same talk run, as drawn
+by pass 2. The current renderer (pass 3, below) is not pictured yet.
 
 ## Run
 
@@ -65,7 +66,7 @@ Keys: `space` play/pause, `1/2/3` shove/silent/talk, `C` chat, `L` labels, `D` s
 
 Decisions accepts raw audio directly, so the Hydrogen perception fallback is not needed.
 
-## Results (one run per condition, same track, seed 1)
+## Results (earlier physics: one run per condition, same track, seed 1)
 
 `tools/run_all.sh` recorded shove, silent and talk on the same 340 s track; `analysis/analyze.py runs/*`
 wrote `out/` (plots, `summary.json`), `analysis/neon_report.py` wrote `out/report.md` (Gemini 4 Neon) and
@@ -83,8 +84,8 @@ Three headline numbers:
    a breakdown against 60% under scripted shoving, with zero exhaustion events. Mean happiness was no better
    than shove, though (0.065 vs 0.071), at about 65 times the tokens.
 
-These three runs were recorded before the two rework passes below (single hot spot, smaller and slower
-agents, hard collisions, H = u / 3); they have not been re-recorded, so the numbers describe the old physics. One run per condition, so small differences are noise; `out/report.md` lists the caveats. Reciprocity could
+**Earlier physics.** These three runs were recorded before the three rework passes below (single hot spot,
+slower agents, hard collisions, H = u / 3); they have not been re-recorded, so the numbers describe the old physics. One run per condition, so small differences are noise; `out/report.md` lists the caveats. Reciprocity could
 not be measured (only 11 asks came from someone who had yielded to the blocker before).
 
 ![anticipation](out/anticipation.png)
@@ -92,7 +93,64 @@ not be measured (only 11 asks came from someone who had yielded to the blocker b
 
 ## Decisions made
 
-### Visual + feel pass 2 (latest; replaces the renderer notes of the first rework)
+### Pass 3: flow + arc (latest; replaces the body, depth, hot-zone, size and "music scales movement" notes of pass 2)
+
+- Bug found on the way: the physics read back each agent's *displayed* velocity (steering + wander + flow)
+  as its steering velocity, so every drift term was amplified about 7.5 times and the forward pull lost to
+  it. Agents wandered the whole box whatever the music did. Steering velocity is now kept separately; the
+  wander, flow, sightline and churn speeds were retuned afterwards.
+- Crowd intensity: one number, 0 calm .. 1 peak. `0.5 * clip((w - 0.8) / 0.9) + 0.5 * clip((energy_5s - 0.2) / 0.45)`
+  where `w` is the house ear's expected section weight (drop 3, build 1.5, groove 1, rest 0.5) and
+  `energy_5s` the 5 s loudness; smoothed 1.5 s up, 3 s down. The raw p(drop) / p(build) were too soft to use
+  directly (drop tops out near 0.37 of seven options). It is logged per tick as `intensity`.
+- The arc: intensity sets a depth band for the crowd, center z 0.74 +- 0.20 when calm, 0.20 +- 0.16 at
+  the peak. Each agent is drawn to a place in the band at up to 0.08 /s: keen agents toward its front,
+  pushers ahead of it (by 0.9 + 0.5 pushiness half-thicknesses, scaled down to 15% when calm), resters
+  behind it. So the action still decides who leads and who trails; the music decides where the band is.
+  Yield, rest and retreat keep their own targets.
+- Spacing: collision reach is 1.30 x the two radii at intensity 0 and 0.82 x at intensity 1 (bodies press
+  into each other on a drop). Collisions are stiffer than pass 2 (28% of an overlap per substep, 4 substeps,
+  cap 14%), because the renderer now shows the pressing.
+- Flow and weave: (1) a curl-noise field in the plane of the glass (three sine modes of a stream function,
+  drifting in time and with depth), speed 0.09 x (0.3 + 0.7 intensity) x liveliness; (2) "sightline": an
+  agent steps sideways out from behind anyone nearer the glass (within 0.9 radii-sums, 2.0 when calm, so the
+  calm crowd spreads over the whole face); (3) anyone blocked on the way forward slips around the body in
+  the way, not only pushers blocked by lighter agents; (4) above intensity 0.65 a convective churn at the
+  front: in at the center, out along the glass, back at the sides, depth 0.36. Diehards ride the flow least
+  (liveliness 0.55), so they keep the front.
+- Hot band widened to x 0.15-0.85, y 0.2-0.8 (D_MAX 1.031).
+- Radius: physical base radius 0.05 (was 0.07). With 0.07 the hundred bodies filled the box and neither the
+  calm spacing nor the packed front had room. Bodies are drawn larger than they collide (1.6x at the glass,
+  0.62x at the back), so on a drop the drawn cells overlap and flatten against each other.
+- Energy: everyone recovers 0.02 /s x (1 - intensity) x (1 - density) when it is calm, and the front crush
+  costs 0.008 (was 0.012), because everyone now reaches the front on a drop. Without this energy drained
+  to 0.3 and happiness with it. H follows u / 1.1 with tau 4 s (was u / 0.75, 10 s) so the crowd warms
+  within a drop.
+- Colour: 75% absolute (H 0.22-0.78 over the palette) + 25% the crowd's own p05-p95 spread, so the whole
+  crowd cools in a breakdown and warms on a drop. Colour is still only happiness, pigment density only
+  energy and depth.
+- Bodies: one full-screen pass over all 100 (`web/src/shaders/bodies.frag.glsl`). For each pixel it finds
+  the nearest and second-nearest body in a distance that is deformed (teardrop tail behind the direction of
+  travel, three spring-driven wobble modes, a slow ambient breathing) and biased by depth (one diameter
+  nearer the glass wins outright). The nearest paints; the margin to the second fades to a paper gap. So
+  cells flatten where they press, a nearer body takes space from one behind, and nothing merges. Considered
+  and dropped: smooth-min metaballs (they merge), per-body neighbour lists (borders disagree).
+- Pigment is now a tint toward the paper, `paper * (1 - d * (1 - color))`, not `exp(-A * d)`: thinning a
+  red-orange by absorbance let green through first, which is where the muddy yellow edges came from. Each
+  body also bleeds a wide weak halo (2.6 radii).
+- Vibration (renderer): shake = bass x proximity^2 x E x (0.25 + 0.75 intensity). It drives a fast buzz
+  (8.5% of a radius), a bounce and a size pulse on each kick, and kicks the wobble modes. Calm crowds only
+  sway slowly.
+- Camera: a long lens from z = -5 (13 degrees), nearly orthographic, so the calm crowd at the back still
+  spreads across the frame; depth reads through size and paleness (pigment fades to 32% at the back).
+- Pigment resolution is 1x CSS pixels (it is soft); grain is added at device resolution.
+- Several tabs: the tab that is playing drives the clock and the audio; a paused tab can no longer stop
+  the run.
+- A stalled tab no longer blocks the physics and tick loops: each send gets 0.5 s, then the socket is closed.
+- Scripted runs (`?track=`) resume playback if it stalls and list the stalls in `window.__stalls`.
+- `tools/record_clips.py` records silent clips of given stretches of the track (no audio is written).
+
+### Visual + feel pass 2 (replaces the renderer notes of the first rework)
 
 - Look: pigment on paper. The paper is #f6ebe6 with drifting +-3.5% grain and a slight vignette; blobs
   write absorbance and the final pass composites `paper * exp(-A)`. Pigment also gets a slow per-pixel

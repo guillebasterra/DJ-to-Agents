@@ -44,9 +44,9 @@ export function happinessColor(t, jitter) {
   return oklabToSrgb([L, a * c - b * s, a * s + b * c]);
 }
 
-// Stretches happiness over the crowd's current spread, so the crowd always
-// uses the whole palette: 56% smoothed crowd p05-p95 (tau 1.4 s) + 44% absolute
-// anchor, then a gentle S-curve.
+// Happiness to palette position. Mostly absolute, so the whole crowd cools in
+// a breakdown and warms on a drop; a quarter follows the crowd's own smoothed
+// p05-p95 spread (tau 1.4 s) so neighbors still differ. Then a gentle S-curve.
 export class HappinessScale {
   constructor() { this.lo = 0.1; this.hi = 0.8; }
 
@@ -61,8 +61,8 @@ export class HappinessScale {
 
   map(h) {
     const rel = (h - this.lo) / Math.max(0.05, this.hi - this.lo);
-    const abs = (h - 0.1) / 0.7;
-    const t = Math.min(1, Math.max(0, 0.56 * rel + 0.44 * abs));
+    const abs = (h - 0.22) / 0.56;
+    const t = Math.min(1, Math.max(0, 0.25 * Math.min(1, Math.max(0, rel)) + 0.75 * abs));
     return t + 0.5 * (t * t * (3 - 2 * t) - t);
   }
 }

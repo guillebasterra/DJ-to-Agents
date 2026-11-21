@@ -141,6 +141,20 @@ export function initUI({ audio, net, overlay, plate, state }) {
       if (url) {
         choose('file', url, path.split('/').slice(-1)[0]).then(() => {
           if (params.has('t') && audio.source.el) audio.source.el.currentTime = +params.get('t');   // start mid-track
+          // Scripted runs have nobody to press play again: if playback stalls
+          // (the audio device changed, the context was suspended), resume it.
+          const stalls = window.__stalls = [];
+          let lastTime = -1;
+          setInterval(() => {
+            const el = audio.source && audio.source.el;
+            if (!el || el.ended) return;
+            if (el.currentTime === lastTime || audio.ctx.state !== 'running') {
+              stalls.push({ t: el.currentTime, paused: el.paused, ready: el.readyState, ctx: audio.ctx.state });
+              audio.ctx.resume();
+              el.play().catch(() => {});
+            }
+            lastTime = el.currentTime;
+          }, 2000);
         });
       }
     };

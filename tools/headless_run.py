@@ -13,7 +13,7 @@ PORT = int(__import__("os").environ.get("CDP_PORT", "9377"))
 async def main(url, wait, expr, shot=None, steps=()):
     prof = tempfile.mkdtemp(prefix="cdp-")
     proc = subprocess.Popen([CHROME, "--headless=new", "--use-angle=metal", "--enable-gpu", "--hide-scrollbars",
-        "--window-size=1280,800", "--autoplay-policy=no-user-gesture-required", "--mute-audio",
+        f"--window-size={__import__('os').environ.get('WINDOW_SIZE', '1280,800')}", "--autoplay-policy=no-user-gesture-required", "--mute-audio",
         "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",   # a beeping fake input for live-mode tests
         f"--remote-debugging-port={PORT}", f"--user-data-dir={prof}", "about:blank"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

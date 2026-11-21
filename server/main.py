@@ -30,6 +30,7 @@ class Session:
         self.run = RunLog(self.world)
         self.clients = set()
         self.last_clock = 0.0
+        self.driver = None    # the client whose audio is playing; other tabs' paused clocks are ignored
         self.tasks = set()    # in-flight Hydrogen asks
         self.generation = 0   # bumped when the run changes, so stale asks are dropped
         self.services = {}    # long-lived helpers (the Gemini client)
@@ -53,14 +54,27 @@ class Session:
 
     async def broadcast(self, frame):
         text = json.dumps(frame, separators=(",", ":"))
-        for sock in list(self.clients):
+        # A stalled tab (backgrounded, or killed without closing its socket) must
+        # not block the physics and tick loops: give each send a moment, then drop it.
+        async def send(sock):
             try:
-                await sock.send_text(text)
+                await asyncio.wait_for(sock.send_text(text), 0.5)
             except Exception:
                 self.clients.discard(sock)
+                try:
+                    await asyncio.wait_for(sock.close(), 0.5)    # so the tab reconnects
+                except Exception:
+                    pass
+        await asyncio.gather(*(send(sock) for sock in list(self.clients)))
 
-    def on_clock(self, msg):
+    def on_clock(self, msg, sock=None):
         w = self.world
+        # Several tabs may be open. The first one that plays drives the clock and
+        # the audio until it stops; other tabs only watch.
+        if self.driver is not sock:
+            if self.playing or not msg.get("playing"):
+                return
+            self.driver = sock
         self.last_clock = time.time()
         w.playing = bool(msg.get("playing"))
         w.t = float(msg.get("t", 0.0))
@@ -160,13 +174,13 @@ async def ws(sock: WebSocket):
                 break
             if msg.get("bytes") is not None:
                 # Raw Int16 PCM, 16 kHz mono: only ever audio that is actually playing.
-                if S.world.playing:
+                if S.world.playing and S.driver is sock:
                     S.run.audio(S.audio.push(msg["bytes"]))
             elif msg.get("text"):
                 data = json.loads(msg["text"])
                 if data.get("type") == "clock":
-                    S.on_clock(data)
-                elif data.get("type") == "control":
+                    S.on_clock(data, sock)
+                elif data.get("type") == "control" and (S.driver is sock or not S.playing):
                     await S.on_control(data)
     except WebSocketDisconnect:
         pass

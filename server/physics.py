@@ -28,9 +28,30 @@ class Physics:
         self.rng = np.random.default_rng(world.seed + 7)
         self.wander = self.rng.normal(size=(n, 3))     # OU state, unit variance
         self.nudge = np.zeros((n, 3))
+        self.vel = np.zeros((n, 3))
         self.slow = np.zeros(n)                        # seconds spent below STALL_SPEED
         self.lively = np.array([C.ARCHETYPE_LIVELINESS[a.archetype] for a in world.agents])
         self.sec = np.zeros(3)                         # smoothed p(build), p(drop), p(breakdown)
+        self.phase = self.rng.uniform(0, 2 * np.pi, n)
+        # Curl-noise modes: (kx, ky, kz, speed, phase x, phase y).
+        self.modes = [(2 * np.pi * kx, 2 * np.pi * ky, kz, sp, *self.rng.uniform(0, 2 * np.pi, 2))
+                      for kx, ky, kz, sp in ((1.0, 1.0, 2.0, 0.23), (1.5, 1.0, -3.0, -0.31), (1.0, 2.0, 4.0, 0.17))]
+
+    @staticmethod
+    def place_of(act):
+        return np.array([C.PLACE_ACTION.get(a, 0.0) for a in act])
+
+    def flow(self, pos, t):
+        """Velocity of the stream function psi = sum sin(kx x + a) sin(ky y + b): (d psi/dy, -d psi/dx, 0),
+        normalized to about unit speed."""
+        x, y, z = pos[:, 0], pos[:, 1], pos[:, 2]
+        out = np.zeros_like(pos)
+        for kx, ky, kz, sp, pa, pb in self.modes:
+            a = kx * x + pa + sp * t + kz * z
+            b = ky * y + pb + 0.7 * sp * t
+            out[:, 0] += np.sin(a) * np.cos(b) * ky
+            out[:, 1] -= np.cos(a) * np.sin(b) * kx
+        return out / (2 * np.pi * 1.6)
 
     def _targets(self, agents, pos, dt):
         """Target by action; recomputed when the action changes or every 0.5 s."""
@@ -74,7 +95,7 @@ class Physics:
         agents = w.agents
         n = len(agents)
         pos = np.array([a.pos for a in agents])
-        vel = np.array([(a.vx, a.vy, a.vz) for a in agents])
+        vel = self.vel      # steering velocity; a.vx.. is what the eye sees (wander and flow included)
         E = np.array([a.E for a in agents])
         H = np.array([a.H for a in agents])
         k = np.array([a.k for a in agents])
@@ -90,42 +111,85 @@ class Physics:
         self._targets(agents, pos, dt)
         target = np.array([a.target for a in agents])
 
-        # 2. integrate: steer toward the target, clamp to max speed.
-        # The house ear's section probabilities, smoothed, scale how much everyone
-        # moves. They never choose an action.
+        # 2. integrate. The music sets one crowd intensity (house ear + loudness).
+        # It scales how far forward, how tight, how fast and how restless the
+        # crowd is. It never chooses an action.
         sp = w.section_p
         goal = np.array([sp.get("build", 0.0), sp.get("drop", 0.0), sp.get("breakdown", 0.0)])
         self.sec += (goal - self.sec) * min(1.0, dt / C.SECTION_TAU)
-        p_build, p_drop, p_break = self.sec
+        music = w.music_energy
+        ear = np.clip((w.w - C.INTENSITY_W[0]) / (C.INTENSITY_W[1] - C.INTENSITY_W[0]), 0.0, 1.0)
+        level = np.clip((w.dsp.get("energy_5s", music) - C.INTENSITY_E[0]) / (C.INTENSITY_E[1] - C.INTENSITY_E[0]), 0.0, 1.0)
+        raw = 0.5 * ear + 0.5 * level
+        w.intensity += (raw - w.intensity) * min(1.0, dt / (C.INTENSITY_RISE if raw > w.intensity else C.INTENSITY_FALL))
+        I = w.intensity
+        peak = float(np.clip((I - C.PEAK_FROM) / (1.0 - C.PEAK_FROM), 0.0, 1.0))
         rad = np.array([a.radius for a in agents])
-        vmax = C.MAX_SPEED * (0.4 + 0.6 * E) * (1.0 + 0.5 * p_build + 0.3 * p_drop)
+        vmax = C.MAX_SPEED * (0.4 + 0.6 * E) * (0.6 + 0.6 * I)
+
+        # Yield, rest and retreat steer to their target.
+        seek = (act == "yield") | (act == "rest") | (act == "retreat")
         to = target - pos
         dist = np.linalg.norm(to, axis=1)
-        want = _unit(to) * (vmax * np.minimum(1.0, dist / 0.03))[:, None]
-        # Tide: the crowd leans toward the glass when it is loud and eases back when quiet.
-        music = w.music_energy
-        loud = float(np.clip(0.6 * music + 0.4 * (w.w - 0.5) / 1.3, 0.0, 1.0))
-        want *= np.where(act == "push", 0.55 + 0.45 * loud, 1.0)[:, None]    # pushing is half-hearted when it is quiet
-        # build: drift forward; drop: closest; breakdown: loosen and drift back.
-        lean = C.TIDE * (2.0 * loud - 1.0) + C.BUILD_DRIFT * p_build + C.DROP_PULL * p_drop - C.BREAK_DRIFT * p_break
-        tide = lean * (0.4 + 0.6 * k)
-        tide = np.where((act == "rest") | (act == "retreat"), np.minimum(tide, 0.0), tide)
+        want = _unit(to) * (vmax * np.minimum(1.0, dist / 0.03) * seek)[:, None]
+
+        # The arc: everyone is drawn to a place in the crowd's depth band. The
+        # band sits back and deep when calm and at the glass at the peak; the
+        # action and keenness say where in the band (pushers lead it, resters trail).
+        zc = C.BAND_CALM[0] + (C.BAND_PEAK[0] - C.BAND_CALM[0]) * I
+        half = C.BAND_CALM[1] + (C.BAND_PEAK[1] - C.BAND_CALM[1]) * I
+        # Pushing is half-hearted when it is calm.
+        lead = np.where(act == "push", (C.PLACE_ACTION["push"] + 0.5 * push) * (0.15 + 0.85 * I), self.place_of(act))
+        place = np.clip(C.PLACE_KEEN * (k - 0.5) + lead, -1.3, 1.9)
+        z_want = np.clip(zc - half * place, C.GLASS_PRESS * rad, 0.95)
+        pull = np.clip(C.ARC_GAIN * (z_want - pos[:, 2]), -C.ARC_SPEED, C.ARC_SPEED)
+        pull = np.where(pull < 0, pull * (0.5 + 0.5 * E) * np.where(act == "push", 0.6 + 0.8 * push, 1.0), pull)
+        pull = np.where(act == "retreat", 0.0, pull)
+        want[:, 2] += pull
         fwd = _unit(C.hot_point(pos) - pos + [0.0, 0.0, -1e-6])
-        want += fwd * tide[:, None]
-        vel += (want - vel) * min(1.0, 4.0 * dt)
+        # Pushers also close in on the band sideways.
+        side_pull = C.hot_point(pos) - pos
+        side_pull[:, 2] = 0.0
+        want += side_pull * (0.5 * (act == "push"))[:, None]
+        vel = vel + (want - vel) * min(1.0, 4.0 * dt)
         speed = np.linalg.norm(vel, axis=1)
-        vel *= np.minimum(1.0, vmax / np.maximum(speed, 1e-9))[:, None]
+        vel = vel * np.minimum(1.0, vmax / np.maximum(speed, 1e-9))[:, None]
 
         # Nobody sits still: Ornstein-Uhlenbeck wander, livelier with the music and with energy.
         self.wander += -self.wander * (dt / C.WANDER_TAU) + np.sqrt(2 * dt / C.WANDER_TAU) * self.rng.normal(size=(n, 3))
-        live = np.maximum(0.30, 0.30 + 0.70 * (0.65 * music + 0.35 * E)) * self.lively * (1.0 + 0.4 * p_drop - 0.25 * p_break)
+        live = (0.25 + 0.75 * (0.65 * I + 0.35 * E)) * self.lively
         drift = C.WANDER_SPEED * live[:, None] * self.wander + self.nudge
         self.nudge *= np.exp(-dt / C.NUDGE_TAU)
+        # Flow: a slow curl-noise field in the plane of the glass (divergence-free,
+        # so it stirs without piling anyone up). Light, lively agents ride it most.
+        drift += self.flow(pos, w.sim_t) * (C.FLOW_SPEED * (0.3 + 0.7 * I) * self.lively)[:, None]
+        # Churn at the peak: in toward the glass at the center, out along it, back at the sides.
+        if peak > 0:
+            sx = 2 * np.pi * (pos[:, 0] - 0.5)
+            sz = np.pi * np.minimum(pos[:, 2] / C.CHURN_DEPTH, 1.0)
+            churn = np.zeros((n, 3))
+            churn[:, 0] = np.sin(sx) * np.cos(sz) * (pos[:, 2] < C.CHURN_DEPTH)
+            churn[:, 2] = -np.cos(sx) * np.sin(sz) * 0.6
+            drift += churn * (C.CHURN * peak * self.lively)[:, None]
+        # Sightline: step sideways out from behind whoever stands between you and the glass.
+        dxy = pos[:, None, :2] - pos[None, :, :2]
+        lat = np.linalg.norm(dxy, axis=-1)
+        dz = pos[:, None, 2] - pos[None, :, 2]              # > 0: j is nearer the glass than i
+        span = (0.9 + C.SIGHT_CALM * (1.0 - I)) * (rad[:, None] + rad[None, :])   # wider when calm: the crowd spreads out
+        blockers = (dz > 0.0) & (dz < 0.45) & (lat < span)
+        away_xy = dxy / np.maximum(lat, 1e-6)[..., None]
+        # Dead center behind someone: pick a side by id so the pair does not sit there.
+        dead = lat < 1e-3
+        away_xy = np.where(dead[..., None], np.stack([np.cos(self.phase), np.sin(self.phase)], 1)[:, None, :], away_xy)
+        shift = (away_xy * (blockers * (1.0 - lat / span) * (1.0 - dz / 0.45))[..., None]).sum(1)
+        sl = np.linalg.norm(shift, axis=1, keepdims=True)
+        drift[:, :2] += C.SIGHTLINE * shift / np.maximum(sl, 1.0)
         # Soft quadratic push away from the walls (half strength at the front glass).
         m = C.WALL_MARGIN
         lo = np.clip((m - (pos - rad[:, None])) / m, 0.0, 1.0) ** 2
         hi = np.clip((m - (1 - rad[:, None] - pos)) / m, 0.0, 1.0) ** 2
         lo[:, 2] *= 0.5
+        hi[:, 2] *= 0.3      # the calm crowd may stand near the back wall
         drift += C.WALL_PUSH * (lo - hi)
 
         start = pos.copy()
@@ -142,9 +206,10 @@ class Physics:
         normal = np.zeros((n, 3))
         eye = np.eye(n, dtype=bool)
         pushing = act == "push"
-        # Loosen up when it is quiet: bodies keep a little extra distance, which
-        # the next loud passage squeezes back out.
-        reach = touch * (1.0 + C.PERSONAL_SPACE * max(1.0 - loud, p_break))
+        # Personal space: when it is calm everyone keeps extra distance, which
+        # the next loud passage squeezes back out; at the peak they press into each other.
+        reach = touch * (1.0 + C.PERSONAL_SPACE * (1.0 - I) - C.SQUEEZE * I)
+        forward = pushing | (pull < -0.01)
         for it in range(C.COLLISION_SUBSTEPS):
             diff = pos[:, None] - pos[None]
             dd = np.linalg.norm(diff, axis=-1)
@@ -156,10 +221,10 @@ class Physics:
                 j = over.argmax(1)
                 hit = over.max(1) > 0
                 normal[hit] = -away[np.arange(n), j][hit]
-                # Shoulder slip: a pusher blocked by a lighter agent slides around it
-                # instead of deadlocking against it.
+                # Slip: anyone blocked on the way forward slides around the body
+                # in the way instead of stacking up behind it.
                 ahead = -(away * fwd[:, None, :]).sum(-1)                 # how squarely j sits in i's way
-                block = (over > 0) & (ahead > 0.3) & pushing[:, None] & (mass[None, :] < mass[:, None])
+                block = (over > 0) & (ahead > 0.3) & forward[:, None]
                 tang = fwd[:, None, :] + ahead[..., None] * away          # fwd minus its part along the contact
                 tl = np.linalg.norm(tang, axis=-1, keepdims=True)
                 side = np.cross(away, [0.0, 1.0, 0.0]) * np.where(np.arange(n) % 2 == 0, 1.0, -1.0)[:, None, None]
@@ -174,7 +239,7 @@ class Physics:
             pos = np.clip(pos, floor, 1 - rad[:, None])      # box walls; the front glass is a wall
         moved = (pos - start) / dt
         # Collisions bleed into velocity so blocked agents actually slow down.
-        vel = 0.5 * vel + 0.5 * (moved - drift)
+        self.vel = 0.5 * vel + 0.5 * (moved - drift)
 
         # Anti-stall: anyone nearly motionless for a while gets a decaying nudge.
         self.slow = np.where(np.linalg.norm(moved, axis=1) < C.STALL_SPEED, self.slow + dt, 0.0)
@@ -193,7 +258,7 @@ class Physics:
         # 5. energy
         resting = (act == "rest") | (act == "retreat") | ((act == "hold") & (rho < 0.2))
         dE = (-C.E_FRONT * v * rho - C.E_PUSH * (act == "push") - C.E_DANCE * (act == "dance")
-              + C.E_REST * (1 - v) * (1 - rho) * resting)
+              + C.E_REST * (1 - v) * (1 - rho) * resting + C.E_CALM * (1 - I) * (1 - rho))
         E = np.clip(E + dE * dt, 0.0, 1.0)
 
         # 6. happiness: utility, EMA, contagion from neighbors.
@@ -225,6 +290,6 @@ class Physics:
     def frame(self):
         r = lambda x: round(x, 3)
         w = self.world
-        return {"type": "physics", "t": round(w.t, 2), "m": [r(float(x)) for x in self.sec], "agents": [
+        return {"type": "physics", "t": round(w.t, 2), "m": [r(float(x)) for x in self.sec] + [r(w.intensity)], "agents": [
             [a.id, r(a.x), r(a.y), r(a.z), r(a.vx), r(a.vy), r(a.vz), r(a.E), r(a.rho), r(a.H), a.action,
              r(a.pressure), r(a.normal[0]), r(a.normal[1]), r(a.normal[2]), r(a.radius)] for a in w.agents]}

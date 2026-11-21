@@ -119,7 +119,7 @@ async def run(S):
     api = gemini.drain()
     api["tick_ms"] = round((time.time() - started) * 1000)
     S.run.tick({
-        "t": t, "tick": world.tick, "condition": cond, "house": house, "w": world.w, "dsp": dsp,
+        "t": t, "tick": world.tick, "condition": cond, "house": house, "w": world.w, "intensity": round(world.intensity, 3), "dsp": dsp,
         "rings": {str(r): e for r, e in heard.items()},
         "agents": [{"id": a.id, "lane": a.lane, "x": round(a.x, 3), "y": round(a.y, 3), "z": round(a.z, 3),
                     "E": round(a.E, 3), "v": round(a.v, 3), "rho": round(a.rho, 3), "H": round(a.H, 4),

@@ -102,6 +102,7 @@ class World:
         self.yielded_to = np.zeros((C.N_AGENTS, C.N_AGENTS), dtype=int)
         self.w = 1.0                 # the house ear's expected section weight
         self.section_p = {}          # the house ear's latest section probabilities
+        self.intensity = 0.0         # smoothed crowd intensity (physics), 0 calm .. 1 peak
         self.t = 0.0                 # playback clock from the browser
         self.sim_t = 0.0             # seconds of simulated physics
         self.playing = False
